@@ -1,0 +1,4 @@
+- insert:
+    - id: video-studio
+      name: dsh-video-studio
+      config: {}

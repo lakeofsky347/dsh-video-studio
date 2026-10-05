@@ -1,0 +1,12 @@
+{
+  "name":"dsh-video-studio","version":"0.1.0","type":"module","license":"MIT",
+  "description":"DSH 视频工作台：图文分镜、前端代码生成与编辑、本地 MP4 导出",
+  "main":"lib/index.js","exports":{".":"./lib/index.js","./client":"./lib/client.js","./package.json":"./package.json"},
+  "files":["lib","docs","cordis.patch.yml","README.md","LICENSE","THIRD_PARTY_NOTICES.md"],
+  "dsh":{"bundle":{"patch":"./cordis.patch.yml"},"client":{"platform":"web","inject":["@deepseek-ai/dsh-client-connection","@deepseek-ai/dsh-client-ui-layout","@deepseek-ai/dsh-client-ui-sidebar","@deepseek-ai/dsh-client-locale","@deepseek-ai/dsh-client-ui-theme"]}},
+  "peerDependencies":{"@deepseek-ai/cordis":"^4.0.4","@deepseek-ai/dsh-llm":"0.2.0-rc.2","@deepseek-ai/dsh-client-connection":"0.2.0-rc.2","@deepseek-ai/dsh-client-ui-layout":"0.2.0-rc.2","@deepseek-ai/dsh-client-ui-sidebar":"0.2.0-rc.2","@deepseek-ai/dsh-client-locale":"0.2.0-rc.2","@deepseek-ai/dsh-client-ui-theme":"0.2.0-rc.2"},
+  "dependencies":{"playwright-core":"1.63.0"},
+  "bundledDependencies":["playwright-core"],
+  "devDependencies":{"@comfyorg/litegraph":"0.17.2","@types/node":"22.20.0","@types/react":"18.3.31","@types/react-dom":"18.3.7","react":"18.3.1","react-dom":"18.3.1","tsdown":"0.22.2","tsx":"4.22.4","typescript":"6.0.3"},
+  "scripts":{"typecheck":"tsc --noEmit","build":"node scripts/build.mjs","test":"node --import tsx --test tests/*.test.ts","preview":"node scripts/preview.mjs","prepack":"npm run typecheck && npm run build"}
+}
