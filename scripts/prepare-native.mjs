@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url';
 
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const archive=process.argv[2]&&path.resolve(process.argv[2]);
-if(!archive)throw new Error('Usage: node scripts/prepare-native.mjs /absolute/path/dsh-video-studio-0.1.0.tgz');
+if(!archive)throw new Error('Usage: node scripts/prepare-native.mjs /absolute/path/dsh-video-studio-VERSION.tgz');
+const sessionFixture=process.env.DSH_SESSION_FIXTURE==='1';
+const provider=sessionFixture?'video-studio-session-offline':'video-studio-offline',model=sessionFixture?'offline-session-video':'offline-video';
 const sourceApp=path.resolve(process.env.DSH_NATIVE_SOURCE_APP??'/Applications/DeepSeek Harness.app');
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const archiveHash=sha(await readFile(archive));
@@ -87,13 +89,13 @@ const dependency=await realpath(path.join(repo,'node_modules','playwright-core')
 const dependencyManifest=JSON.parse(await readFile(path.join(dependency,'package.json'),'utf8'));
 if(dependencyManifest.version!==manifest.dependencies?.['playwright-core'])throw new Error('Local playwright-core version does not match the package');
 await cp(dependency,path.join(profile,'node_modules','playwright-core'),{recursive:true,dereference:true});
-const fixture=path.join(profile,'offline-provider.mjs');await copyFile(path.join(repo,'tests','fixtures','preview-provider.mjs'),fixture);
+const fixture=path.join(profile,'offline-provider.mjs');await copyFile(path.join(repo,'tests','fixtures',sessionFixture?'session-provider.mjs':'preview-provider.mjs'),fixture);
 await copyFile(path.join(repo,'tests','fixtures','fixture-response.mjs'),path.join(profile,'fixture-response.mjs'));
 await writeFile(path.join(profile,'package.json'),JSON.stringify({name:'dsh-video-studio-native-acceptance',private:true,
   dependencies:{'dsh-video-studio':`file:${packageArchive}`},dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','dsh-video-studio']}}},null,2)+'\n');
 await writeFile(path.join(profile,'cordis.yml'),'[]\n');
 await writeFile(path.join(profile,'pnpm-workspace.yaml'),'packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n');
-await writeFile(path.join(profile,'cordis.patch.yml'),`# Owned native acceptance. Simulated model only; no real provider credentials.\n- id: webserver\n  config:\n    host: 127.0.0.1\n    port: 0\n- id: llm-pi-ai\n  disabled: true\n- id: llm-deepseek\n  disabled: true\n- id: llm-deepseek-account\n  disabled: true\n- id: agent-default-model\n  config:\n    provider: video-studio-offline\n    model: offline-video\n- insert:\n    - id: video-studio-offline\n      name: ${JSON.stringify(fixture)}\n- id: video-studio\n  config:\n    baseDirectory: ${JSON.stringify(projects)}\n- id: ui-settings-general\n  config:\n    welcomeNoticeVersion: 2026-09-28.1\n- id: ui-settings-account\n  config:\n    version: 1\n    step: done\n    usage: detailed\n    developerTools: true\n    purpose: null\n    process: standard\n    completion: api-key\n- id: ui-theme\n  config:\n    preference: light\n- id: deepseek-account\n  config:\n    desktopPlatform: null\n    platformOrigin: http://127.0.0.1:9\n    inferenceOrigin: http://127.0.0.1:9\n    allowLoopbackHttp: true\n    requestTimeoutMs: 250\n    balanceTimeoutMs: 250\n    logoutMaxRetries: 0\n- id: workspace-controller\n  config:\n    documentsDirectory: ${JSON.stringify(documents)}\n`);
+await writeFile(path.join(profile,'cordis.patch.yml'),`# Owned native acceptance. Simulated model only; no real provider credentials.\n- id: webserver\n  config:\n    host: 127.0.0.1\n    port: 0\n- id: llm-pi-ai\n  disabled: true\n- id: llm-deepseek\n  disabled: true\n- id: llm-deepseek-account\n  disabled: true\n- id: agent-default-model\n  config:\n    provider: ${provider}\n    model: ${model}\n- insert:\n    - id: ${provider}\n      name: ${JSON.stringify(fixture)}\n- id: video-studio\n  config:\n    baseDirectory: ${JSON.stringify(projects)}\n- id: ui-settings-general\n  config:\n    welcomeNoticeVersion: 2026-09-28.1\n- id: ui-settings-account\n  config:\n    version: 1\n    step: done\n    usage: detailed\n    developerTools: true\n    purpose: null\n    process: standard\n    completion: api-key\n- id: ui-theme\n  config:\n    preference: light\n- id: deepseek-account\n  config:\n    desktopPlatform: null\n    platformOrigin: http://127.0.0.1:9\n    inferenceOrigin: http://127.0.0.1:9\n    allowLoopbackHttp: true\n    requestTimeoutMs: 250\n    balanceTimeoutMs: 250\n    logoutMaxRetries: 0\n- id: workspace-controller\n  config:\n    documentsDirectory: ${JSON.stringify(documents)}\n`);
 let cloned=false;
 try{run('/bin/cp',['-cR',sourceApp,app]);cloned=true;}catch{await rm(app,{recursive:true,force:true});run('/usr/bin/ditto',[sourceApp,app]);}
 const sourceAsar=path.join(sourceApp,'Contents','Resources','app.asar'),targetAsar=path.join(app,'Contents','Resources','app.asar');
@@ -124,7 +126,7 @@ const prepared={status:'prepared-not-launched',preparedAt:new Date().toISOString
   nativeProgram:{source:sourceApp,originalAsarSha256:sha(original),copyAsarSha256:sha(changed),modifiedEntries:['package.json',mainEntry],otherEntriesUnchanged:unchanged,apfsClone:cloned,
     isolation:['DSH_HOME','userData','sessionData','logs','documents','plugin project directory','package identity','scheme claim disabled','vendor updater disabled','account origins loopback'],signature:'own-copy ad-hoc deep strict verification passed',formalAppUnchanged:true},
   dependency:{name:dependencyManifest.name,version:dependencyManifest.version,source:dependency,materialized:true},
-  mock:{provider:'video-studio-offline',model:'offline-video',fixture,sha256:sha(await readFile(fixture)),realProvidersDisabled:true},launchScript,
+  mock:{provider,model,fixture,sha256:sha(await readFile(fixture)),realProvidersDisabled:true},launchScript,
   limitation:'Native runtime isolation modifies only the owned acceptance app. This preparation is not a native UI check or a real-provider test.'};
 await writeFile(path.join(root,'prepared.json'),JSON.stringify(prepared,null,2)+'\n');
 console.log(JSON.stringify({status:prepared.status,root,app,installed,archiveSha256:archiveHash,launchScript},null,2));

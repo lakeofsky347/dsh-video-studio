@@ -1,0 +1,29 @@
+import { useEffect, useState } from 'react';
+import { updateTarget } from '../core/index.ts';
+import type { VideoProject, VideoTarget } from '../shared/types.ts';
+
+export const ASPECTS=[{id:'16:9',label:'16:9 横屏',w:16,h:9},{id:'9:16',label:'9:16 竖屏',w:9,h:16},{id:'1:1',label:'1:1 方形',w:1,h:1},{id:'4:5',label:'4:5 竖屏',w:4,h:5},{id:'4:3',label:'4:3 横屏',w:4,h:3},{id:'3:4',label:'3:4 竖屏',w:3,h:4},{id:'21:9',label:'21:9 宽银幕',w:21,h:9},{id:'16:10',label:'16:10 横屏',w:16,h:10}] as const;
+export const FPS_PRESETS=[{num:24,den:1},{num:25,den:1},{num:30,den:1},{num:50,den:1},{num:60,den:1},{num:24000,den:1001},{num:30000,den:1001},{num:60000,den:1001}] as const;
+export function aspectId(target:Pick<VideoTarget,'width'|'height'>):string{return ASPECTS.find(a=>Math.abs(target.width/target.height-a.w/a.h)<.003)?.id||'custom';}
+export function dimensionsForAspect(aspect:string,shortSide:number):{width:number;height:number}{const a=ASPECTS.find(v=>v.id===aspect)||ASPECTS[0];const even=(n:number)=>Math.max(64,Math.round(n/2)*2);return a.w>=a.h?{width:even(shortSide*a.w/a.h),height:even(shortSide)}:{width:even(shortSide),height:even(shortSide*a.h/a.w)};}
+export function fpsLabel(fps:{num:number;den:number}):string{return fps.den===1?String(fps.num):(fps.num/fps.den).toFixed(3).replace(/0+$/,'').replace(/\.$/,'');}
+export function targetLabel(target:VideoTarget):string{const ratio=aspectId(target);return `${ratio==='custom'?'自定义':ratio} · ${target.width} × ${target.height} · ${fpsLabel(target.fps)} FPS`;}
+
+export function OutputSettings({project,onChange}:{project:VideoProject;onChange:(project:VideoProject)=>void}){
+  const t=project.target,[width,setWidth]=useState(String(t.width)),[height,setHeight]=useState(String(t.height));
+  const [numerator,setNumerator]=useState(String(t.fps.num)),[denominator,setDenominator]=useState(String(t.fps.den)),[error,setError]=useState(''),[customOpen,setCustomOpen]=useState(false),[fpsCustomOpen,setFpsCustomOpen]=useState(false);
+  useEffect(()=>{setWidth(String(t.width));setHeight(String(t.height));setNumerator(String(t.fps.num));setDenominator(String(t.fps.den));},[t.width,t.height,t.fps.num,t.fps.den]);
+  const ratio=aspectId(t),short=Math.min(t.width,t.height),fpsValue=`${t.fps.num}/${t.fps.den}`;
+  function change(patch:Partial<VideoTarget>){try{onChange(updateTarget(project,patch));setError('');}catch(e){setError(e instanceof Error?e.message:'输出设置无效');}}
+  const customSize=()=>change({width:Number(width),height:Number(height)}),customFps=()=>change({fps:{num:Number(numerator),den:Number(denominator)}});
+  return <div className="vs-output-settings">
+    <label className="vs-field"><span>画幅比例</span><select aria-label="画幅比例" value={customOpen?'custom':ratio} onChange={e=>{setCustomOpen(e.target.value==='custom');if(e.target.value!=='custom')change(dimensionsForAspect(e.target.value,short));}}>{ASPECTS.map(a=><option key={a.id} value={a.id}>{a.label}</option>)}<option value="custom">自定义宽高</option></select></label>
+    <label className="vs-field"><span>分辨率</span><select aria-label="分辨率" value={[480,720,1080,1440,2160].includes(short)?String(short):'custom'} onChange={e=>{if(e.target.value==='custom'){setCustomOpen(true);return;}const size=Number(e.target.value);change(ratio==='custom'?{width:Math.round(t.width*size/short/2)*2,height:Math.round(t.height*size/short/2)*2}:dimensionsForAspect(ratio,size));}}>{[480,720,1080,1440,2160].map(n=><option key={n} value={n}>{n===2160?'4K · ':''}{n}p · 短边 {n}px</option>)}<option value="custom">自定义 · {t.width} × {t.height}</option></select></label>
+    <details className="vs-output-custom" open={customOpen} onToggle={e=>setCustomOpen(e.currentTarget.open)}><summary>自定义画面尺寸</summary><div className="vs-field-pair"><label className="vs-field"><span>宽度（像素）</span><input aria-label="宽度（像素）" type="number" min="64" max="8192" step="2" value={width} onChange={e=>setWidth(e.target.value)}/></label><label className="vs-field"><span>高度（像素）</span><input aria-label="高度（像素）" type="number" min="64" max="8192" step="2" value={height} onChange={e=>setHeight(e.target.value)}/></label></div><button onClick={customSize}>应用尺寸</button></details>
+    <label className="vs-field"><span>帧率（FPS）</span><select aria-label="帧率（FPS）" value={!fpsCustomOpen&&FPS_PRESETS.some(f=>`${f.num}/${f.den}`===fpsValue)?fpsValue:'custom'} onChange={e=>{setFpsCustomOpen(e.target.value==='custom');if(e.target.value==='custom')return;const [num,den]=e.target.value.split('/').map(Number);change({fps:{num:num!,den:den!}});}}>{FPS_PRESETS.map(f=><option key={`${f.num}/${f.den}`} value={`${f.num}/${f.den}`}>{fpsLabel(f)} FPS</option>)}<option value="custom">自定义分数帧率</option></select><small>切换帧率保留镜头的秒长，重新计算整数帧。</small></label>
+    <details className="vs-output-custom" open={fpsCustomOpen} onToggle={e=>setFpsCustomOpen(e.currentTarget.open)}><summary>自定义 FPS 分子 / 分母</summary><div className="vs-field-pair"><input aria-label="FPS 分子" type="number" min="1" value={numerator} onChange={e=>setNumerator(e.target.value)}/><input aria-label="FPS 分母" type="number" min="1" value={denominator} onChange={e=>setDenominator(e.target.value)}/></div><button onClick={customFps}>应用帧率</button></details>
+    <label className="vs-field"><span>编码质量</span><select aria-label="编码质量" value={t.quality||'standard'} onChange={e=>change({quality:e.target.value as VideoTarget['quality']})}><option value="standard">标准 · CRF 18</option><option value="high">高质量 · CRF 16</option><option value="small">更小文件 · CRF 23</option></select></label>
+    <div className="vs-output-readback">{t.width} × {t.height} · {fpsLabel(t.fps)} FPS<br/>{project.shots.reduce((n,s)=>n+s.durationFrames,0)} 帧 · {t.audioMode==='mixed'?'音画合成':'无声'} MP4</div>
+    {error&&<p role="alert" className="vs-inline-error">{error}</p>}
+  </div>;
+}

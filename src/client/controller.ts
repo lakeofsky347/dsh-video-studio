@@ -3,7 +3,7 @@ import type { ClientRpc, ModelRoute, SceneSource, StudioApi, StudioSnapshot, Vid
 export interface StudioState {
   snapshot:StudioSnapshot|null; loading:boolean; pending:boolean; saving:boolean;
   error:string; notice:string; scheme:'light'|'dark'; selected:string|null;
-  route:ModelRoute; canUndo:boolean; canRedo:boolean; localImages:Record<string,string>;
+  route:ModelRoute; canUndo:boolean; canRedo:boolean; localImages:Record<string,string>;focusFrame:number|null;focusSerial:number;
 }
 
 export class RpcStudioApi implements StudioApi {
@@ -17,7 +17,7 @@ export class RpcStudioApi implements StudioApi {
 
 /** One observable survives sidebar navigation; its job poller is owned by the plugin. */
 export class StudioController {
-  private state:StudioState={snapshot:null,loading:true,pending:false,saving:false,error:'',notice:'',scheme:'dark',selected:null,route:{provider:'',model:''},canUndo:false,canRedo:false,localImages:{}};
+  private state:StudioState={snapshot:null,loading:true,pending:false,saving:false,error:'',notice:'',scheme:'dark',selected:null,route:{provider:'',model:''},canUndo:false,canRedo:false,localImages:{},focusFrame:null,focusSerial:0};
   private listeners=new Set<()=>void>();
   private disposed=false;
   private saveTimer:ReturnType<typeof setTimeout>|undefined;
@@ -43,12 +43,21 @@ export class StudioController {
     const provider=snapshot.providers.find(p=>p.id===route.provider)||snapshot.providers.find(p=>p.models.length);
     const model=provider?.models.find(m=>m.id===route.model)||provider?.models[0];
     const selected=this.state.selected;
-    this.update({snapshot:{...snapshot,project},loading:false,...(changed?{selected:null,canUndo:false,canRedo:false}:{}),
+    this.update({snapshot:{...snapshot,project},loading:false,...(changed?{selected:null,canUndo:false,canRedo:false,focusFrame:null}:{}),
       ...(!selected||project?.shots.some(s=>s.id===selected)||project?.assets.some(a=>a.id===selected)?{}:{selected:null}),
       route:{provider:provider?.id||'',model:model?.id||''}});
     if(snapshot.task?.status==='running')this.schedulePoll();
   }
   async load():Promise<void>{try{this.accept(await this.api.call<StudioSnapshot>('catalog'));this.update({error:''});}catch(e){this.update({loading:false,error:message(e)});}}
+  async focusProject(project:string|{projectId?:string;path?:string;sessionId?:string;shotId?:string;frame?:number},focus:{shotId?:string;frame?:number;sessionId?:string}={}):Promise<void>{
+    const payload=typeof project==='string'?{projectId:project,...focus}:project;
+    await this.action('focus',payload);if(this.state.error)throw new Error(this.state.error);if(payload.projectId&&this.state.snapshot?.project?.id!==payload.projectId)throw new Error('工程定位未完成，请稍后重试');const selected=payload.shotId??this.state.snapshot?.focus?.shotId;
+    if(selected)this.select(selected);
+    const frame=payload.frame??this.state.snapshot?.focus?.frame;
+    if(frame!==undefined)this.update({focusFrame:frame,focusSerial:this.state.focusSerial+1});
+  }
+  async bindSession(sessionId:string):Promise<void>{await this.action('bindSession',{sessionId},'工程已关联到会话');}
+  async audio(payload:unknown):Promise<void>{await this.action('audio',payload);}
   private schedulePoll():void {
     if(this.disposed||this.polling||this.pollTimer)return;
     this.pollTimer=setTimeout(()=>{this.pollTimer=undefined;void this.poll();},700);
@@ -56,7 +65,7 @@ export class StudioController {
   private async poll():Promise<void>{
     if(this.disposed||this.polling)return;this.polling=true;
     const epoch=this.actionEpoch;
-    try{const snapshot=await this.api.call<StudioSnapshot>('current');if(epoch===this.actionEpoch&&!this.state.pending)this.accept(snapshot);}catch(e){this.update({error:message(e)});}
+    try{const snapshot=await this.api.call<StudioSnapshot>('current',{projectId:this.state.snapshot?.project?.id});if(epoch===this.actionEpoch&&!this.state.pending)this.accept(snapshot);}catch(e){this.update({error:message(e)});}
     finally{this.polling=false;if(this.state.snapshot?.task?.status==='running')this.schedulePoll();}
   }
   setScheme=(scheme:'light'|'dark'):void=>this.update({scheme});
@@ -67,7 +76,7 @@ export class StudioController {
   edit=(project:VideoProject,record=true):void=>{
     if(!this.state.snapshot||this.state.pending)return;
     const task=this.state.snapshot.task;
-    if(task?.status==='running'&&['storyboard','scenes','modify'].includes(task.kind))return;
+    if(task?.status==='running'&&['storyboard','scenes','modify','audio'].includes(task.kind))return;
     this.editSerial++;this.dirty=true;
     if(record){this.history=this.history.slice(0,this.historyIndex+1);this.history.push(clone(project));if(this.history.length>50)this.history.shift();this.historyIndex=this.history.length-1;}
     this.update({snapshot:{...this.state.snapshot,project},saving:true,notice:'',canUndo:this.historyIndex>0,canRedo:this.historyIndex<this.history.length-1});
@@ -91,8 +100,8 @@ export class StudioController {
   }
   async action(endpoint:string,payload:unknown={},notice=''):Promise<void>{
     if(this.state.pending)return;this.actionEpoch++;this.update({pending:true,error:'',notice:''});
-    try{await this.flush();if(this.dirty)throw new Error(this.state.error||'项目尚未保存，请重试保存。');const snapshot=await this.api.call<StudioSnapshot>(endpoint,payload);this.accept(snapshot,false);
-      if(snapshot.project&&['create','open','import'].includes(endpoint)){this.history=[clone(snapshot.project)];this.historyIndex=0;this.update({canUndo:false,canRedo:false});}
+    try{await this.flush();if(this.dirty)throw new Error(this.state.error||'项目尚未保存，请重试保存。');const request=['create','open','focus'].includes(endpoint)?payload:{projectId:this.state.snapshot?.project?.id,...payload as object};const snapshot=await this.api.call<StudioSnapshot>(endpoint,request);this.accept(snapshot,false);
+      if(snapshot.project&&['create','open','import','apply','audio','focus'].includes(endpoint)){this.history=[clone(snapshot.project)];this.historyIndex=0;this.update({canUndo:false,canRedo:false});}
       this.update({notice});
     }catch(e){this.update({error:message(e)});}finally{this.update({pending:false});}
   }
@@ -100,7 +109,7 @@ export class StudioController {
     if(this.busy)return;if(!this.state.route.provider||!this.state.route.model){this.update({error:'先选择一个 DSH 模型，再开始生成。'});return;}
     await this.action('generate',{kind,instruction,shotId,...this.state.route});
   }
-  async readSource(shotId:string):Promise<SceneSource>{return this.api.call<SceneSource>('source',{shotId});}
+  async readSource(shotId:string):Promise<SceneSource>{return this.api.call<SceneSource>('source',{shotId,projectId:this.state.snapshot?.project?.id});}
   async saveSource(shotId:string,source:SceneSource):Promise<void>{await this.action('saveSource',{shotId,source},'源码已保存，可以刷新预览。');}
   async restoreSource(shotId:string):Promise<void>{await this.action('restoreSource',{shotId},'已恢复上次可用源码。');}
   async importFile(file:File):Promise<void>{
@@ -111,7 +120,9 @@ export class StudioController {
       if(asset)this.update({localImages:{...this.state.localImages,[asset.id]:data}});
     }else if(file.type.startsWith('text/')||/\.(txt|md)$/i.test(file.name)){
       await this.action('import',{name:file.name,mime:'text/plain',text:await file.text()});
-    }else this.update({error:'首版支持图片和文字文件。请选择 PNG、JPEG、WebP、TXT 或 Markdown。'});
+    }else if(file.type.startsWith('audio/')||/\.(wav|mp3|m4a|aac|flac|ogg|aiff)$/i.test(file.name)){
+      const data=await readDataUrl(file);await this.action('import',{name:file.name,mime:file.type,dataBase64:data.slice(data.indexOf(',')+1)});
+    }else this.update({error:'请选择图片、文字或 WAV、MP3、M4A、AAC、FLAC、OGG 音频。'});
   }
   get busy():boolean{return this.state.pending||this.state.snapshot?.task?.status==='running';}
   async dispose():Promise<void>{this.disposed=true;clearTimeout(this.saveTimer);clearTimeout(this.pollTimer);await this.flush();this.listeners.clear();}

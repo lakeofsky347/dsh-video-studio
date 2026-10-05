@@ -1,4 +1,4 @@
-import type { Asset, Shot, VideoProject, VideoSpec } from '../shared/types.js';
+import type { Asset, Shot, VideoProject, VideoSpec, VideoTarget } from '../shared/types.js';
 export { defaultSceneSource } from './default-source.js';
 
 export interface ValidationResult { ok:boolean; errors:string[]; warnings:string[] }
@@ -35,7 +35,7 @@ export function createProject(title:string,topic=''):VideoProject {
     target:{width:1920,height:1080,fps:{num:30,den:1},audioMode:'none'},
     assets:[],shots,shotOrder:shots.map(s=>s.id),
     graph:{positions:Object.fromEntries(shots.map((s,i)=>[s.id,[i*370,120] as [number,number]])),groups:[]},
-    outputs:[],extensions:{}};
+    outputs:[],audioClips:[],sessionIds:[],extensions:{}};
 }
 
 export function defaultShot(index=0,fps={num:30,den:1}):Shot {
@@ -67,7 +67,8 @@ export function validateProject(project:VideoProject):ValidationResult {
       errors.push('画面尺寸须为 64–8192 范围内的偶数');
     if(!Number.isInteger(target.fps.num)||!Number.isInteger(target.fps.den)||target.fps.num<=0||target.fps.den<=0||target.fps.num/target.fps.den>120)
       errors.push('FPS 须为正整数分子/分母，且不超过 120');
-    if(target.audioMode!=='none')errors.push('首版只支持无声视频');
+    if(!['none','mixed'].includes(target.audioMode))errors.push('音频模式无效');
+    if(target.quality!==undefined&&!['standard','high','small'].includes(target.quality))errors.push('编码质量无效');
   }
   if(!Array.isArray(project.shots)||!Array.isArray(project.assets)||!Array.isArray(project.shotOrder))
     return {ok:false,errors:[...errors,'镜头、资产和镜头顺序须为数组'],warnings};
@@ -78,10 +79,11 @@ export function validateProject(project:VideoProject):ValidationResult {
   assertUnique(project.shotOrder,'镜头顺序',errors);
   const assetIds=new Set(project.assets.map(a=>a.id)),shotIds=new Set(project.shots.map(s=>s.id));
   for(const asset of project.assets) {
-    if(!['image','text'].includes(asset.kind))errors.push(`资产 ${asset.id} 类型不支持`);
+    if(!['image','text','audio'].includes(asset.kind))errors.push(`资产 ${asset.id} 类型不支持`);
     if(typeof asset.name!=='string'||!asset.name.trim())errors.push(`资产 ${asset.id} 缺少名称`);
     if(asset.kind==='image' && (typeof asset.path!=='string'||!safeRelativePath(asset.path)))errors.push(`图片 ${asset.id} 需要项目内相对路径`);
     if(asset.kind==='text' && typeof asset.text!=='string')errors.push(`文字资产 ${asset.id} 缺少文本`);
+    if(asset.kind==='audio'&&(typeof asset.path!=='string'||!safeRelativePath(asset.path)||!Number.isFinite(asset.duration)||asset.duration!<=0))errors.push(`音频 ${asset.id} 需要有效路径和时长`);
   }
   for(const shot of project.shots) {
     if(typeof shot.title!=='string'||!shot.title.trim())errors.push(`镜头 ${shot.id} 缺少标题`);
@@ -112,6 +114,13 @@ export function validateProject(project:VideoProject):ValidationResult {
   else for(const [node,position] of Object.entries(project.graph.positions))
     if(!Array.isArray(position)||position.length!==2||!position.every(Number.isFinite))errors.push(`节点 ${node} 的画布位置无效`);
   if(!plainObject(project.extensions))errors.push('扩展数据须为对象');
+  for(const clip of project.audioClips??[]){
+    if(!clip||typeof clip.id!=='string'||!project.assets.some(a=>a.id===clip.assetId&&a.kind==='audio')){errors.push('音频片段引用无效');continue;}
+    if(clip.shotId&&!shotIds.has(clip.shotId))errors.push(`音频片段 ${clip.id} 引用的镜头不存在`);
+    if(!['voice','music','sfx'].includes(clip.role))errors.push(`音频片段 ${clip.id} 角色无效`);
+    for(const key of ['startSeconds','trimStart','volume','fadeIn','fadeOut'] as const)if(!Number.isFinite(clip[key])||clip[key]<0)errors.push(`音频片段 ${clip.id} ${key} 无效`);
+    if(clip.trimEnd!==undefined&&(!Number.isFinite(clip.trimEnd)||clip.trimEnd<=clip.trimStart))errors.push(`音频片段 ${clip.id} 裁剪区间无效`);
+  }
   const graph=validateGraph(project);warnings.push(...graph.errors.map(e=>`主链草稿：${e}`));
   return {ok:errors.length===0,errors,warnings};
 }
@@ -192,7 +201,7 @@ export function normalizeSceneDurations(shots:Shot[],targetFrames:number):Shot[]
 export function specMarkdown(spec:VideoSpec):string {
   const {target}=spec,fps=target.fps.num/target.fps.den;
   const lines=[`# ${spec.title}：视频制作要求`,'',`主题：${spec.topic||'尚未填写'}`,
-    `画面：${target.width} × ${target.height}；FPS：${target.fps.num}/${target.fps.den}；无声 MP4。`,
+    `画面：${target.width} × ${target.height}；FPS：${target.fps.num}/${target.fps.den}；${target.audioMode==='mixed'?'含音频':'无声'} MP4；质量：${target.quality??'high'}。`,
     `总时长：${formatSeconds(spec.durationSeconds)} 秒（${spec.durationFrames} 帧）；共 ${spec.shots.length} 个镜头。`,
     '', '顺序以镜头主链为准；画布位置仅用于组织节点。每个镜头的源码须读取共享参数、由帧号独立求值。',''];
   spec.shots.forEach((shot,index)=>{
@@ -201,6 +210,7 @@ export function specMarkdown(spec:VideoSpec):string {
       `观众应理解：${shot.intent||'待细化'}`,`构图：${shot.composition||'待细化'}`,`动作：${shot.action||'待细化'}`,
       `进入转场：${shot.transition==='fade'?'淡入':'直接切入'}`,`画面文字：${shot.params.text||'无'}`,
       `字幕／补充文字：${shot.params.subtitle||'无'}`,
+      `旁白：${shot.narration||'无'}`,
       `生产资产：${shot.assets.length?shot.assets.map(a=>`${a.name} (${a.id}，${a.kind}${a.description?`，${a.description}`:''})`).join('；'):'尚未绑定'}`,
       `参考资产 ID：${shot.referenceIds.join('、')||'无'}`,`源码目录：${shot.sourcePath}`,
       '', '画面参数：', '', '```json',JSON.stringify(shot.params,null,2),'```','');
@@ -257,7 +267,7 @@ export function addShot(project:VideoProject,shot=defaultShot(project.shots.leng
 }
 export function deleteShot(project:VideoProject,shotId:string):VideoProject {
   shotOf(project,shotId);const next=changed(project);next.shots=next.shots.filter(s=>s.id!==shotId);next.shotOrder=next.shotOrder.filter(s=>s!==shotId);
-  delete next.graph.positions[shotId];syncEdges(next);return next;
+  delete next.graph.positions[shotId];next.audioClips=next.audioClips?.filter(c=>c.shotId!==shotId);syncEdges(next);return next;
 }
 export function duplicateShot(project:VideoProject,shotId:string):VideoProject {
   const original=shotOf(project,shotId),shot=copy(original);shot.id=id('shot');shot.title+= '（副本）';shot.sourcePath=`shots/${shot.id}`;
@@ -284,11 +294,33 @@ export function deleteAsset(project:VideoProject,assetId:string):VideoProject {
   if(!project.assets.some(a=>a.id===assetId))throw new Error(`找不到资产：${assetId}`);
   const next=changed(project);next.assets=next.assets.filter(a=>a.id!==assetId);delete next.graph.positions[assetId];
   for(const shot of next.shots){shot.assetIds=shot.assetIds.filter(a=>a!==assetId);shot.referenceIds=shot.referenceIds.filter(a=>a!==assetId);}
+  next.audioClips=next.audioClips?.filter(c=>c.assetId!==assetId);
   return next;
 }
 export function addAsset(project:VideoProject,asset:Asset):VideoProject {
   if(project.assets.some(a=>a.id===asset.id))throw new Error(`资产 ID 已存在：${asset.id}`);
   const next=changed(project);next.assets.push(copy(asset));return next;
+}
+
+/** Keep timing in seconds when changing the output timebase. Persist original second lengths
+ * across FPS-only changes so repeated 24 ↔ 60 changes do not accumulate rounding drift. */
+export function updateTarget(project:VideoProject,patch:Partial<VideoTarget>):VideoProject {
+  const next=changed(project),target={...next.target,...copy(patch)};
+  const oldFps=project.target.fps.num/project.target.fps.den,newFps=target.fps.num/target.fps.den;
+  if(!Number.isFinite(newFps)||newFps<=0||newFps>120)throw new Error('FPS须大于0且不超过120');
+  if(newFps!==oldFps){
+    const retained=project.extensions.timebaseSeconds as Record<string,{frames:number;fps:number;seconds:number}>|undefined;
+    const timing:Record<string,{frames:number;fps:number;seconds:number}>={};
+    next.shots=next.shots.map(shot=>{
+      const saved=retained?.[shot.id];
+      const seconds=saved&&saved.frames===shot.durationFrames&&saved.fps===oldFps?saved.seconds:shot.durationFrames/oldFps;
+      const frames=Math.max(1,Math.round(seconds*newFps));timing[shot.id]={frames,fps:newFps,seconds};
+      return {...shot,durationFrames:frames};
+    });next.extensions.timebaseSeconds=timing;
+  }
+  next.target=target;
+  const check=validateProject(next);if(!check.ok)throw new Error(check.errors.join('\n'));
+  return next;
 }
 
 /** Snapshots isolate caller edits and discard redo after any new edit. */

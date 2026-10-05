@@ -1,3 +1,7 @@
+import type { ToolDefinition } from '@deepseek-ai/dsh-tools';
+import type { JobSpec, JobId } from '@deepseek-ai/dsh-jobs';
+import type { ImageAttachmentRef, FileAttachmentRef } from '@deepseek-ai/dsh-attachment';
+
 export interface HostContext {
   llm:{
     listProviders():{id:string;name:string}[];
@@ -6,6 +10,12 @@ export interface HostContext {
     stream(options:{provider:string;model:string;messages:unknown[];system:string;maxTokens:number;sessionId:string;signal:AbortSignal}):AsyncIterable<{type:string;text?:string;reason?:{kind:string;failure?:{message:string}}}>;
   };
   get?(name:string):unknown;
+  tools?:{register(definition:ToolDefinition):()=>void};
+  jobs?:{start(spec:JobSpec):JobId};
+  attachments?:{
+    readImage(ref:ImageAttachmentRef,signal?:AbortSignal):Promise<{data:Uint8Array}>;
+    fileHostPath(ref:FileAttachmentRef):string|undefined;
+  };
   connection:{fetch:{register(route:{path:string;methods:readonly ['POST'];requestBody:'buffered';fetch(request:Request):Promise<Response>}):()=>Promise<void>}};
   effect(factory:()=>void|(()=>void|Promise<void>),label?:string):unknown;
 }

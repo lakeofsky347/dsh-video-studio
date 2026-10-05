@@ -10,12 +10,13 @@ import type { Asset, EnvironmentInfo, EnvironmentSettings, ExportResult, SceneSo
 import { compileSpec } from '../core/index.js';
 import { ProjectStore, projectPath } from './store.js';
 import { browserRuntime, runtimeHtml } from '../runtime/browser.js';
+import {AudioMixer, type AudioMix} from './audio.js';
 
 export interface FrameCapture { frame:number; shotId:string; path:string; sha256:string }
 export interface RenderIssue { shotId?:string; frame?:number; message:string }
 export interface RenderCheckResult { ok:boolean; errors:RenderIssue[]; frames:FrameCapture[]; reportPath?:string }
 interface ProjectServer { server:Server; origin:string; root:string }
-const mime:Record<string,string>={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json; charset=utf-8','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.txt':'text/plain; charset=utf-8','.woff2':'font/woff2','.mp4':'video/mp4'};
+const mime:Record<string,string>={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json; charset=utf-8','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.txt':'text/plain; charset=utf-8','.woff2':'font/woff2','.mp4':'video/mp4','.wav':'audio/wav','.mp3':'audio/mpeg','.m4a':'audio/mp4','.aac':'audio/aac','.flac':'audio/flac','.ogg':'audio/ogg'};
 
 export function detectEnvironment(settings:Partial<EnvironmentSettings>={}):EnvironmentInfo {
   const browserPath=settings.browserPath||firstExisting([
@@ -65,9 +66,9 @@ async function projectServer(root:string):Promise<ProjectServer> {
       const stat=await fs.stat(full);if(!stat.isFile())throw new Error('File expected');
       const headers:Record<string,string|number>={'Content-Type':type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',
         'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'none'"};
-      if(type==='video/mp4')headers['Accept-Ranges']='bytes';
+      const media=type==='video/mp4'||type.startsWith('audio/');if(media)headers['Accept-Ranges']='bytes';
       let start=0,end=stat.size-1,status=200;
-      if(req.headers.range&&type==='video/mp4'){
+      if(req.headers.range&&media){
         const range=/^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
         if(!range||(!range[1]&&!range[2])){res.writeHead(416,{'Content-Range':'bytes */'+stat.size});res.end();return;}
         if(!range[1]){const suffix=Number(range[2]);start=Math.max(0,stat.size-suffix);}
@@ -94,6 +95,7 @@ export class VideoRenderer {
   private pendingServers=new Map<string,Promise<ProjectServer>>();
   private browsers=new Set<Browser>();
   private children=new Set<ChildProcess>();
+  private audioMixer=new AudioMixer();
   private readonly store:ProjectStore;
   constructor(store:ProjectStore=new ProjectStore()) { this.store=store; }
   async preview(root:string,project:VideoProject):Promise<string> {
@@ -104,6 +106,11 @@ export class VideoRenderer {
   async assetUrl(root:string,asset:Asset):Promise<string> {
     if(!asset.path)return '';await projectPath(root,asset.path);
     return (await this.server(root)).origin+'/'+asset.path.split('/').map(encodeURIComponent).join('/');
+  }
+  async audioPreview(root:string,project:VideoProject,settings:EnvironmentSettings,signal?:AbortSignal):Promise<string|null>{
+    const mix=await this.audioMixer.mix(root,project,settings,signal);if(!mix)return null;
+    const relative=path.relative(root,mix.path).split(path.sep).map(encodeURIComponent).join('/');
+    return (await this.server(root)).origin+'/'+relative+'?revision='+project.revision;
   }
   private async server(root:string):Promise<ProjectServer> {
     const key=path.resolve(root),existing=this.servers.get(key);if(existing)return existing;
@@ -167,6 +174,18 @@ export class VideoRenderer {
     if(!result.ok){const error=new Error(result.message) as Error&RenderIssue;error.shotId=result.shotId;error.frame=result.frame;throw error;}
     return {buffer:await page.screenshot({type:'png',clip:{x:0,y:0,width:spec.target.width,height:spec.target.height},timeout:30_000}),shotId:result.info.sceneId};
   }
+  async capture(root:string,project:VideoProject,settings:EnvironmentSettings,frame:number,signal?:AbortSignal):Promise<FrameCapture&{url:string}>{
+    const spec=await this.prepare(root,project),errors:RenderIssue[]=[];aborted(signal);
+    if(!Number.isSafeInteger(frame)||frame<0||frame>=spec.durationFrames)throw new Error('Frame outside project: '+frame);
+    let connection:Awaited<ReturnType<VideoRenderer['openPage']>>|undefined;
+    try{
+      const server=await this.server(root);connection=await this.openPage(server.origin+'/index.html',spec,settings,errors,signal);
+      const result=await this.frame(connection.page,spec,frame);aborted(signal);
+      if(errors.length)throw new Error(errors.map(error=>error.message).join('; '));
+      const relative='.studio/inspection/'+project.revision+'-'+frame+'-'+randomUUID()+'.png',file=await projectPath(root,relative);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,result.buffer);
+      return {frame,shotId:result.shotId,path:file,sha256:hash(result.buffer),url:server.origin+'/'+relative};
+    }finally{if(connection){connection.removeAbort();await connection.browser.close().catch(()=>{});this.browsers.delete(connection.browser);}}
+  }
   async check(root:string,project:VideoProject,settings:EnvironmentSettings,signal?:AbortSignal):Promise<RenderCheckResult> {
     const errors:RenderIssue[]=[],frames:FrameCapture[]=[];let connection:Awaited<ReturnType<VideoRenderer['openPage']>>|undefined;
     const reportRoot=await projectPath(root,'validation/check-'+randomUUID());await fs.mkdir(reportRoot,{recursive:true});
@@ -216,12 +235,16 @@ export class VideoRenderer {
     const spec=await this.prepare(snapshotRoot,snapshot),errors:RenderIssue[]=[],frames:FrameCapture[]=[];
     if(spec.target.width%2||spec.target.height%2)throw new Error('H.264 yuv420p requires even width and height');
     const snapshotServer=await projectServer(snapshotRoot);let connection:Awaited<ReturnType<VideoRenderer['openPage']>>|undefined,encoder:ChildProcess|undefined;
-    const mp4Path=path.join(outputRoot,'video.mp4'),logPath=path.join(outputRoot,'ffmpeg.log');let log='';
+    const mp4Path=path.join(outputRoot,'video.mp4'),logPath=path.join(outputRoot,'ffmpeg.log');let log='',audioMix:AudioMix|null=null;
     const cancel=()=>{if(encoder)stopChild(encoder);};signal.addEventListener('abort',cancel,{once:true});
     let encoderResult:Promise<void>|undefined;
     try {
-      onProgress(0.03,'制作输入已保存快照');connection=await this.openPage(snapshotServer.origin+'/index.html',spec,env,errors,signal);
-      encoder=spawn(env.ffmpegPath,['-hide_banner','-loglevel','warning','-y','-f','image2pipe','-vcodec','png','-framerate',spec.target.fps.num+'/'+spec.target.fps.den,'-i','pipe:0','-an','-c:v','libx264','-preset','medium','-crf','18','-pix_fmt','yuv420p','-movflags','+faststart',mp4Path],{stdio:['pipe','ignore','pipe']});this.children.add(encoder);
+      onProgress(0.03,'制作输入已保存快照');audioMix=await this.audioMixer.mix(snapshotRoot,snapshot,env,signal);
+      if(audioMix){await fs.writeFile(path.join(outputRoot,'audio-plan.json'),json(audioMix.plan));onProgress(.06,'配音、音乐与音效已完成混音');}
+      connection=await this.openPage(snapshotServer.origin+'/index.html',spec,env,errors,signal);
+      const audioArgs=audioMix?['-i',audioMix.path,'-map','0:v:0','-map','1:a:0','-c:a','aac','-b:a','192k','-ar','48000','-ac','2','-t',String(spec.durationSeconds)]:['-an'];
+      const crf=spec.target.quality==='high'?'16':spec.target.quality==='small'?'23':'18';
+      encoder=spawn(env.ffmpegPath,['-hide_banner','-loglevel','warning','-y','-f','image2pipe','-vcodec','png','-framerate',spec.target.fps.num+'/'+spec.target.fps.den,'-i','pipe:0',...audioArgs,'-c:v','libx264','-preset','medium','-crf',crf,'-pix_fmt','yuv420p','-movflags','+faststart',mp4Path],{stdio:['pipe','ignore','pipe']});this.children.add(encoder);
       encoder.stderr?.on('data',chunk=>{log+=String(chunk);if(log.length>2_000_000)log=log.slice(-2_000_000);});
       encoder.stdin?.on('error',()=>{});
       encoderResult=new Promise<void>((resolve,reject)=>{
@@ -245,8 +268,8 @@ export class VideoRenderer {
       }
       encoder.stdin?.end();await encoderResult;await fs.writeFile(logPath,log);
       await this.verifySeek(connection.page,spec,frames,errors,signal);if(errors.length)throw new Error(errors.map(error=>error.message).join('; '));
-      onProgress(0.94,'核对视频规格与帧数');const qa=await this.mediaQa(mp4Path,spec,env,signal);
-      const result:ExportResult={id,path:mp4Path,url:undefined,createdAt:new Date().toISOString(),revision:project.revision,width:spec.target.width,height:spec.target.height,frameCount:spec.durationFrames,duration:spec.durationSeconds,qa:{...qa,silent:true,arbitrarySeek:'PASS',coldReload:'PASS',inputHashes,frames,browser:connection.browser.version(),snapshotRoot,logPath}};
+      onProgress(0.94,'核对视频规格、帧数与音轨');const qa=await this.mediaQa(mp4Path,spec,env,signal,!!audioMix);
+      const result:ExportResult={id,path:mp4Path,url:undefined,createdAt:new Date().toISOString(),revision:project.revision,width:spec.target.width,height:spec.target.height,frameCount:spec.durationFrames,duration:spec.durationSeconds,qa:{...qa,silent:!audioMix,quality:spec.target.quality??'standard',crf:Number(crf),audioPlan:audioMix?.plan,arbitrarySeek:'PASS',coldReload:'PASS',inputHashes,frames,browser:connection.browser.version(),snapshotRoot,logPath}};
       await fs.writeFile(path.join(outputRoot,'result.json'),json(result));
       result.url=(await this.server(root)).origin+'/exports/'+id+'/video.mp4';onProgress(1,'视频导出完成');return result;
     }catch(error){
@@ -258,15 +281,17 @@ export class VideoRenderer {
       await closeServer(snapshotServer.server);
     }
   }
-  private async mediaQa(file:string,spec:VideoSpec,settings:EnvironmentSettings,signal:AbortSignal):Promise<Record<string,unknown>> {
-    const output=await this.command(settings.ffprobePath,['-v','error','-count_frames','-show_entries','stream=codec_type,codec_name,width,height,pix_fmt,r_frame_rate,nb_read_frames,duration:format=duration','-of','json',file],signal);
+  private async mediaQa(file:string,spec:VideoSpec,settings:EnvironmentSettings,signal:AbortSignal,expectedAudio=false):Promise<Record<string,unknown>> {
+    const output=await this.command(settings.ffprobePath,['-v','error','-count_frames','-show_entries','stream=codec_type,codec_name,width,height,pix_fmt,r_frame_rate,nb_read_frames,duration,start_time,sample_rate,channels:format=duration','-of','json',file],signal);
     const parsed=JSON.parse(output),stream=parsed.streams?.find((item:{codec_type:string})=>item.codec_type==='video');
-    if(parsed.streams?.some((item:{codec_type:string})=>item.codec_type==='audio'))throw new Error('First version requires a silent output; FFprobe found an audio stream');
+    const audios=parsed.streams?.filter((item:{codec_type:string})=>item.codec_type==='audio')??[];
+    if(audios.length!==(expectedAudio?1:0))throw new Error('FFprobe audio stream count mismatch');
+    if(expectedAudio&&(audios[0].codec_name!=='aac'||audios[0].channels!==2||Number(audios[0].sample_rate)!==48000||Math.abs(Number(audios[0].start_time??0))>.025||Math.abs(Number(audios[0].duration)-spec.durationSeconds)>Math.max(.05,1/(spec.target.fps.num/spec.target.fps.den))))throw new Error('FFprobe audio codec, duration or synchronization mismatch');
     if(!stream||stream.codec_name!=='h264'||stream.pix_fmt!=='yuv420p'||stream.width!==spec.target.width||stream.height!==spec.target.height||Number(stream.nb_read_frames)!==spec.durationFrames)throw new Error('FFprobe video dimensions, codec, pixel format or frame count mismatch');
     const [num,den]=String(stream.r_frame_rate).split('/').map(Number),actualFps=num/den,expectedFps=spec.target.fps.num/spec.target.fps.den;
     const duration=Number(stream.duration??parsed.format?.duration);
     if(Math.abs(actualFps-expectedFps)>0.0001||Math.abs(duration-spec.durationSeconds)>1/expectedFps+0.001)throw new Error('FFprobe FPS or duration mismatch');
-    return {status:'PASS',codec:stream.codec_name,pixelFormat:stream.pix_fmt,fps:stream.r_frame_rate,frameCount:Number(stream.nb_read_frames),duration,audioStreams:0};
+    return {status:'PASS',codec:stream.codec_name,pixelFormat:stream.pix_fmt,fps:stream.r_frame_rate,frameCount:Number(stream.nb_read_frames),duration,audioStreams:audios.length,...(expectedAudio?{audioCodec:audios[0].codec_name,audioDuration:Number(audios[0].duration),audioStart:Number(audios[0].start_time??0),sampleRate:Number(audios[0].sample_rate),channels:audios[0].channels}:{})};
   }
   private command(executable:string,args:string[],signal:AbortSignal):Promise<string> {
     aborted(signal);return new Promise((resolve,reject)=>{
@@ -279,6 +304,7 @@ export class VideoRenderer {
   }
   async close():Promise<void> {
     for(const child of this.children)stopChild(child);
+    await this.audioMixer.close();
     await Promise.allSettled([...this.browsers].map(browser=>browser.close()));this.browsers.clear();
     await Promise.allSettled([...this.pendingServers.values()]);
     await Promise.allSettled([...this.servers.values()].map(server=>closeServer(server.server)));this.servers.clear();this.pendingServers.clear();

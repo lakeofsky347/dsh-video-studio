@@ -65,7 +65,7 @@ export function normalizeStoryboard(value:unknown,project:VideoProject):Shot[] {
   const shots:Shot[]=value.shots.map((data:unknown,index:number)=>{
     if(!record(data))throw new Error(`第 ${index+1} 个镜头须为对象`);
     const shot=defaultShot(index,project.target.fps);
-    for(const key of ['title','intent','composition','action'] as const)if(typeof data[key]==='string'&&(key!=='title'||data[key].trim()))shot[key]=data[key];
+    for(const key of ['title','intent','composition','action','narration'] as const)if(typeof data[key]==='string'&&(key!=='title'||data[key].trim()))shot[key]=data[key];
     const seconds=Number(data.durationSeconds),duration=Number.isFinite(seconds)&&seconds>0?seconds:6;
     shot.durationFrames=Math.max(1,Math.round(duration*project.target.fps.num/project.target.fps.den));
     shot.assetIds=[...new Set((Array.isArray(data.assetIds)?data.assetIds:[]).filter((id:unknown):id is string=>typeof id==='string'&&known.has(id)))];
@@ -97,7 +97,7 @@ export class DshSceneGenerator implements SceneGenerator {
       }
     }
     let output='';let stopped=false;
-    for await(const chunk of this.ctx.llm.stream({...route,messages:[{id:randomUUID(),role:'user',source:{kind:'user'},content}],system:SYSTEM,maxTokens,sessionId:`video-studio-${randomUUID()}`,signal})){
+    for await(const chunk of this.ctx.llm.stream({...route,messages:[{id:randomUUID(),role:'user',source:{kind:'user'},content}],system:SYSTEM,maxTokens,sessionId:project.sessionIds?.[0]??`video-studio-${randomUUID()}`,signal})){
       signal.throwIfAborted();
       if(chunk.type==='text-delta'){output+=chunk.text??'';this.onText(output);}
       if(chunk.type==='finish'){
@@ -109,7 +109,7 @@ export class DshSceneGenerator implements SceneGenerator {
   }
   async storyboard(project:VideoProject,route:ModelRoute,signal:AbortSignal):Promise<Shot[]>{
     const input={task:'storyboard',topic:project.topic,title:project.title,target:project.target,durationSeconds:project.targetDuration,assets:project.assets,
-      requirements:'生成一条清晰的分镜链，建议3到8个镜头，合计目标时长；准确引用素材ID；文字与意图不只是重复主题。',
+      requirements:'依据用户主题与指定风格安排镜头数量、布局、动作和节奏，生成一条清晰分镜链，合计目标时长；准确引用素材ID；旁白与屏幕文字分别创作，避免同一默认布局重复套用。',
       output:{shots:[{title:'镜头标题',intent:'叙事目标',composition:'图片与文字构图',action:'入场、保持、离场的动作要求',durationSeconds:6,assetIds:['已有素材ID'],referenceIds:[],transition:'fade',params:{text:'屏幕主文字',subtitle:'屏幕副文字',background:'#101820',foreground:'#ffffff',accent:'#80e0bd',imageX:50,imageY:50,imageScale:1,imageFit:'contain',fontSize:88,motion:'fade'}}]}};
     let raw=await this.ask(project,route,signal,input,6000);let value:any;
     try{value=parseModelJson(raw);}catch{raw=await this.ask(project,route,signal,{...input,repair:'上次JSON无法读取，请纠正并返回完整JSON',previous:raw},6000);value=parseModelJson(raw);}

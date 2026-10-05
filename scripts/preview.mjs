@@ -5,8 +5,8 @@ const root=resolve(import.meta.dirname,'..'),pluginRoot=resolve(process.env.DSH_
 const cli=process.env.DSH_CLI??'/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh';
 if(!existsSync(cli))throw new Error('Set DSH_CLI to the installed DSH executable');
 if(!existsSync(resolve(pluginRoot,'lib/index.js')))throw new Error('Build the plugin first');
-const home=resolve(root,'.local/test-home'),profileName='video-studio-v1',profile=resolve(home,'profiles',profileName);
-const env={...process.env,DSH_HOME:home,DSH_VIDEO_PROJECTS:resolve(root,'.local/projects')};
+const home=resolve(process.env.DSH_PREVIEW_HOME??resolve(root,'.local/test-home')),profileName=process.env.DSH_PREVIEW_PROFILE??'video-studio-v1',profile=resolve(home,'profiles',profileName);
+const env={...process.env,DSH_HOME:home,DSH_VIDEO_PROJECTS:resolve(process.env.DSH_PREVIEW_PROJECTS??resolve(root,'.local/projects'))};
 mkdirSync(dirname(profile),{recursive:true});
 if(!existsSync(resolve(profile,'cordis.yml'))){const init=spawnSync(cli,['--profile',profileName,'--from-default-profile','web','--help'],{cwd:root,env,encoding:'utf8'});if(init.status!==0)throw new Error(init.stderr||'Could not initialize isolated profile');}
 const manifestPath=resolve(profile,'package.json'),manifest=JSON.parse(readFileSync(manifestPath,'utf8'));
@@ -15,11 +15,11 @@ writeFileSync(manifestPath,JSON.stringify(manifest,null,2)+'\n');
 const link=resolve(profile,'node_modules/dsh-video-studio');mkdirSync(dirname(link),{recursive:true});
 if(existsSync(link)&&lstatSync(link).isSymbolicLink()&&resolve(dirname(link),readlinkSync(link))!==pluginRoot)unlinkSync(link);
 if(!existsSync(link))symlinkSync(pluginRoot,link,'dir');
-const patch=resolve(root,'.local/offline.patch.yml');
-writeFileSync(patch,`- insert:\n    - id: video-studio-offline\n      name: ${JSON.stringify(resolve(root,'tests/fixtures/preview-provider.mjs'))}\n`);
+const patch=resolve(home,'offline.patch.yml'),sessionFixture=process.env.DSH_SESSION_FIXTURE==='1';
+writeFileSync(patch,sessionFixture?`- id: agent-default-model\n  config:\n    provider: video-studio-session-offline\n    model: offline-session-video\n- id: llm-pi-ai\n  disabled: true\n- id: llm-deepseek\n  disabled: true\n- id: llm-deepseek-account\n  disabled: true\n- insert:\n    - id: video-studio-session-offline\n      name: ${JSON.stringify(resolve(root,'tests/fixtures/session-provider.mjs'))}\n`:`- insert:\n    - id: video-studio-offline\n      name: ${JSON.stringify(resolve(root,'tests/fixtures/preview-provider.mjs'))}\n`);
 const args=['--profile',profileName,'--no-open','--port',process.env.DSH_PREVIEW_PORT??'19405'];
 writeFileSync(resolve(profile,'cordis.patch.yml'),process.env.DSH_OFFLINE==='0'?'[]\n':readFileSync(patch,'utf8'));
-console.log('Isolated DSH profile: video-studio-v1. Offline provider is a test fixture.');
+console.log(`Isolated DSH profile: ${profileName}. Offline provider is a test fixture.`);
 const child=spawn(cli,args,{cwd:root,env,stdio:'inherit'});
 for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>child.kill(signal));
 child.once('exit',code=>{process.exitCode=code??0;});

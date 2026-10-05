@@ -2,8 +2,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
-import type { Asset, SceneSource, Shot, VideoProject } from '../shared/types.js';
+import type { Asset, EnvironmentSettings, SceneSource, Shot, VideoProject } from '../shared/types.js';
 import { createProject, defaultSceneSource } from '../core/index.js';
+import {probeAudio} from './audio.js';
 
 export interface StoreOptions { baseDirectory?:string }
 export interface ImportAssetInput { path?:string; dataBase64?:string; mime?:string; text?:string; name?:string; description?:string }
@@ -83,6 +84,26 @@ export class ProjectStore {
     await fs.mkdir(this.baseDirectory,{recursive:true});
     const items=await this.recent();
     await atomicWrite(path.join(this.baseDirectory,'recent.json'),json([{path:path.resolve(root),title:project.title,id:project.id},...items.filter(item=>path.resolve(item.path)!==path.resolve(root))].slice(0,20)));
+  }
+  async importAsset(root:string,input:ImportAssetInput,settings:Partial<EnvironmentSettings>={},signal?:AbortSignal):Promise<Asset>{
+    const extension=path.extname(input.path??input.name??'').toLowerCase();
+    if(input.mime?.startsWith('audio/')||['.wav','.mp3','.m4a','.aac','.flac','.ogg'].includes(extension)||input.dataBase64?.startsWith('data:audio/'))return this.importAudio(root,input,settings,signal);
+    return this.importImageOrText(root,input);
+  }
+  async importAudio(root:string,input:ImportAssetInput,settings:Partial<EnvironmentSettings>={},signal?:AbortSignal):Promise<Asset>{
+    signal?.throwIfAborted();const id=randomUUID(),temporary=await projectPath(root,'assets/'+id+'.audio-input');let buffer:Buffer;
+    if(input.dataBase64!==undefined){
+      const encoded=input.dataBase64.replace(/^data:[^;]+;base64,/,'');
+      if(encoded.length>180_000_000||!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded))throw new Error('音频数据无效或超过 128 MB');buffer=Buffer.from(encoded,'base64');
+    }else if(input.path){
+      const info=await fs.stat(input.path);if(!info.isFile()||info.size>128*1024*1024)throw new Error('音频文件须不超过 128 MB');buffer=await fs.readFile(input.path);
+    }else throw new Error('请选择音频文件');
+    if(!buffer.length||buffer.length>128*1024*1024)throw new Error('音频文件须为 1 字节至 128 MB');
+    try{
+      await atomicWrite(temporary,buffer);const metadata=await probeAudio(temporary,settings,signal);signal?.throwIfAborted();
+      const relative='assets/'+id+metadata.extension;await fs.rename(temporary,await projectPath(root,relative));
+      return {id,kind:'audio',name:input.name??(input.path?path.basename(input.path):'音频素材'+metadata.extension),description:input.description??'',path:relative,mime:metadata.mime,duration:metadata.duration,sampleRate:metadata.sampleRate,channels:metadata.channels};
+    }finally{await fs.rm(temporary,{force:true});}
   }
   async importImageOrText(root:string,input:ImportAssetInput):Promise<Asset> {
     const id=randomUUID(), description=input.description??'';

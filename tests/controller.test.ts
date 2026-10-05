@@ -31,3 +31,11 @@ test('disposal flushes the last edit before its debounce expires',async()=>{
   const api={async call(endpoint:string,payload:any){if(endpoint==='catalog')return structuredClone(state);if(endpoint==='save'){writes++;return {...state,project:payload.project};}throw new Error(endpoint);}} as StudioApi;
   const controller=new StudioController(api);await controller.load();controller.edit({...state.project!,title:'退出前最后一笔',revision:1});await controller.dispose();assert.equal(writes,1);
 });
+
+test('project switching clears a previous session frame and failed focus stays on the existing project',async()=>{
+  let state=snapshot();const first=state.project!.id;
+  const api={async call(endpoint:string,payload:any){if(endpoint==='catalog')return structuredClone(state);if(endpoint==='focus'){if(payload.projectId==='missing')throw new Error('未找到视频工程');return structuredClone(state);}if(endpoint==='create'){state=snapshot();return structuredClone(state);}throw new Error(endpoint);}} as StudioApi;
+  const controller=new StudioController(api);await controller.load();await controller.focusProject(first,{frame:700});assert.equal(controller.getSnapshot().focusFrame,700);
+  await controller.action('create');assert.equal(controller.getSnapshot().focusFrame,null);assert.notEqual(controller.getSnapshot().snapshot!.project!.id,first);
+  const current=controller.getSnapshot().snapshot!.project!.id;await assert.rejects(()=>controller.focusProject('missing',{frame:30}),/未找到/);assert.equal(controller.getSnapshot().snapshot!.project!.id,current);assert.equal(controller.getSnapshot().focusFrame,null);await controller.dispose();
+});

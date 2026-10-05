@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createProject, defaultShot, compileSpec, specMarkdown, validateProject, validateGraph,
   reorderShots, reorderFromGraph, addShot, duplicateShot, deleteShot, addAsset, bindAsset,
-  unbindAsset, deleteAsset, UndoHistory, defaultSceneSource, normalizeSceneDurations } from '../src/core/index.js';
+  unbindAsset, deleteAsset, UndoHistory, defaultSceneSource, normalizeSceneDurations,updateTarget,updateShot } from '../src/core/index.js';
 import { normalizeStoryboard, parseSceneSource, parseModelJson } from '../src/host/generator.ts';
 
 test('default project compiles three contiguous ten-second scenes in sequence order',()=>{
@@ -21,6 +21,21 @@ test('fractional FPS produces integer frame budgets without scaling time from ca
   const p=createProject('分数帧率');p.target.fps={num:30000,den:1001};
   p.shots=[defaultShot(0,p.target.fps),defaultShot(1,p.target.fps)];p.shotOrder=p.shots.map(s=>s.id);
   const spec=compileSpec(p);assert.equal(spec.durationFrames,600);assert.equal(spec.durationSeconds,20.02);
+});
+
+test('changing FPS preserves seconds without repeated rounding drift; edited shot timing takes precedence',()=>{
+  let project=createProject('可切换时基');project.shots[0]!.durationFrames=31;const original=project.shots.map(s=>s.durationFrames);
+  for(let i=0;i<8;i++){project=updateTarget(project,{fps:{num:24,den:1},width:1080,height:1080});project=updateTarget(project,{fps:{num:60,den:1}});project=updateTarget(project,{fps:{num:30,den:1}});}
+  assert.deepEqual(project.shots.map(s=>s.durationFrames),original);assert.equal(project.target.width,1080);
+  project=updateShot(project,project.shots[0]!.id,{durationFrames:90});project=updateTarget(project,{fps:{num:60,den:1}});
+  assert.equal(project.shots[0]!.durationFrames,180);assert.equal(compileSpec(project).durationSeconds,23);
+});
+
+test('audio references follow shot removal and asset deletion while legacy silent projects remain valid',()=>{
+  const project=createProject('音频数据');project.target.audioMode='mixed';project.assets.push({id:'voice',kind:'audio',name:'配音',description:'',path:'assets/voice.wav',duration:2,sampleRate:48000,channels:2});
+  project.audioClips=[{id:'clip',assetId:'voice',role:'voice',shotId:project.shots[1]!.id,startSeconds:0,trimStart:0,volume:1,fadeIn:0,fadeOut:0}];
+  assert.equal(validateProject(project).ok,true);assert.equal(deleteShot(project,project.shots[1]!.id).audioClips!.length,0);assert.equal(deleteAsset(project,'voice').audioClips!.length,0);
+  const old=createProject('旧工程');delete old.audioClips;delete old.sessionIds;assert.equal(validateProject(old).ok,true);
 });
 
 test('duration normalization preserves exact budgets and one frame for every shot',()=>{

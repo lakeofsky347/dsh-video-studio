@@ -110,3 +110,51 @@ export function render(ctx) {
 ## 验证范围
 
 核心单元测试检查：主链帧区间、分数 FPS、精确整数帧预算、资产删除清理、镜头增删复制、断链/分叉/循环拒绝、无效引用/路径、undo/redo，以及执行默认源码时文案/图片绘制与重复取帧。这些测试证明核心逻辑和受控场景逻辑；浏览器真实布局、生成模型质量、DSH 原生接入和最终媒体输出由对应的运行与回读测试证明。
+
+## V0.2：会话、输出与声音
+
+项目新增可选 `sessionIds`、`audioClips`；镜头新增可选 `narration`；资产 kind 扩展为 `audio`，保存相对路径、MIME、duration、sampleRate 和 channels。`target.audioMode` 为 `none` 或 `mixed`，`target.quality` 为 `standard`、`high` 或 `small`。旧工程缺少这些字段时仍按无声工程处理。
+
+`updateTarget(project, patch)` 保持镜头的实际秒数，再按新 FPS 换算整数帧。`extensions.timebaseSeconds` 保存当前秒数依据；直接修改镜头帧数后，下一次规格变更按新的实际时长重新计算。
+
+### 模型工具
+
+| 工具 | 操作与关键输入 | 返回 |
+|---|---|---|
+| `video_project` | create/open/get/list/bind；target、title、topic、targetDuration 或 projectId/path | 稳定 ID、完整镜头/素材/声音片段、revision、关联 session ID |
+| `video_update` | update 含 shots、shotOrder、shotPatches、sources、target 等；imports 含 durable attachment、文字或本地文件；expectedRevision 可检查手动编辑版本 | 更新后的工程回执 |
+| `video_inspect` | shotId、frame、includeSource | VideoSpec、可选源码、实际 PNG 帧路径/URL/hash；卡片可定位工作台 |
+| `video_render` | preview/check/export；foreground 默认 false | 后台返回 DSH jobId；前台等待并返回工程与输出 |
+| `video_audio` | import/add/update/remove/synthesize；request 含 assetId、shotId、角色、裁剪等 | 导入/片段更新结果，合成返回后台 jobId |
+
+`exec.agent.id` 是工具所属会话。Session 索引位于工程基目录 `sessions.json`，工程文件保存关联 session ID。省略 projectId 时仅查当前会话当前工程。后台任务 owner 也是该会话，进度、日志、完成通知及取消复用 DSH Jobs。模型提交现有对话中的要求和源码，不通过插件重复调用另一个聊天模型。
+
+`video_update.sources` 接受 `{shotId,source:{html,css,js}}[]`，先验证整批镜头引用和源码结构，再写入文件。模型应先读取最新 revision 并保留稳定镜头 ID，只提交用户要求修改的范围。
+
+### AudioClip
+
+```ts
+interface AudioClip {
+  id: string;
+  assetId: string;
+  role: 'voice' | 'music' | 'sfx';
+  shotId?: string; // 有值则 startSeconds 相对镜头，否则相对成片
+  startSeconds: number;
+  trimStart: number;
+  trimEnd?: number;
+  volume: number;
+  fadeIn: number;
+  fadeOut: number;
+  loop?: boolean;
+}
+```
+
+音频片段以秒保存；排序或 FPS 变化后，镜头起点根据新主链重新计算。混音使用 FFmpeg，将裁剪、循环、音量、淡化、延迟处理后合成 48 kHz 双声道 PCM WAV；MP4 编码为 AAC。缓存文件名含音频输入与片段计划的内容 hash，不覆盖旧混音，URL 版本变化不会改变已加载内容。
+
+绑定镜头的非循环旁白所需长度为 `startSeconds + min(trimEnd ?? asset.duration, asset.duration) - trimStart`。若超过镜头，默认扩展到所需时长加 0.25 秒；未超过则不延长。`extensions.lockDuration === true` 或请求 `fitDuration:false` 时超出会返回明确差额。更新、save、apply 共用政策。全片旁白不自动选择哪个镜头延长；超片尾返回错误。音乐/音效可按片尾裁剪。重新合成同镜头旁白替换原 voice 片段，旧资产继续保留。
+
+TTS 是独立能力，不把 ctx.llm 当作音频接口。本地适配为 macOS say；HTTP 适配由用户明确配置 endpoint/model/voice/speed/enabled。凭据引用 `DSH_VIDEO_STUDIO_TTS_API_KEY` 经 DSH credentials 保存/清除/解析，snapshot 只返回是否配置，不返回值。
+
+### 精确帧与预览
+
+`inspect` 使用当前项目源码在 Playwright 中调用同一 `ready()` / `renderFrame({frame,fps})`，保存真实 PNG。frame 为全片零起始帧，输出包含对应 shotId、文件路径、URL 与 SHA-256。工作台关键帧也运行同一代码。实时播放含音轨时使用音频 currentTime 作为时钟；任意帧定位、冷启动和导出仍使用帧号确定画面。

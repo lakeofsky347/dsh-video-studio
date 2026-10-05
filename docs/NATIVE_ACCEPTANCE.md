@@ -7,7 +7,7 @@
 先构建插件并取得最终安装包，之后执行：
 
 ```sh
-node scripts/prepare-native.mjs /absolute/path/dsh-video-studio-0.1.0.tgz
+node scripts/prepare-native.mjs /absolute/path/dsh-video-studio-0.2.0.tgz
 ```
 
 脚本将安装包复制并提取到 `.local/native/<archive-sha256-prefix>/home/profiles/desktop/node_modules/dsh-video-studio/`。插件目录是安装包中的真实文件，不是指向源码的 symlink；逐文件 SHA-256 与归档回读相等后才进入后续准备。宿主外部依赖 `playwright-core` 从已有本地同版本安装物理复制，无网络安装。
@@ -38,3 +38,12 @@ profile 禁用真实 provider adapters，account/inference origins 设置为 loo
 原生验收应分别记录：安装包实体读取、插件页面载入、图与参数编辑、模拟生成、共享参数与源码联动、完整预览、实际 MP4 导出与媒体回读、错误/取消/恢复、重开项目和 own-process 清理。构建通过、准备通过、原生界面观察、模拟提供商测试和真实提供商测试是不同证据，不能互相替代。
 
 准备本身不会生成原生 UI 或导出成功的结论。原生启动后还应回读实际 DSH_HOME、profile、项目目录及输出版本，最后正常退出自己启动的副本，保留准备和验收记录。
+
+
+## V0.2 会话与声音验收
+
+准备最终发行包时设置 `DSH_SESSION_FIXTURE=1`，将 profile 模型切换为 `video-studio-session-offline/offline-session-video`。该固定提供方通过官方 agent loop 发出真实工具调用，可覆盖图片附件、源码提交、帧捕获、后台导出、音频导入、Jobs 取结果与取消。
+
+启动原生副本时设置 `DSH_VIDEO_SESSION_LOG` 和 `DSH_VIDEO_SESSION_AUDIO` 为本次隔离目录里的记录和测试 WAV 路径，可加 `--remote-debugging-port=19408` 让专用验收脚本连接自己启动的 webContents。`scripts/verify-session.mjs` 支持 `DSH_TEST_URL`、`DSH_NATIVE_CDP` 和 `DSH_SESSION_REPORT_DIR`，原生模式实际点击卡片、进入工作台、编辑参数、返回同一会话。日志不保存登录 token 或真实凭据。
+
+V0.2 的记录独立写入 `artifacts/verification/v0.2/`。原生验收仍要检查最终 TGZ 与实体安装字节一致，并正常关闭验收副本；正式应用和用户 profile 的安装状态另行说明。
