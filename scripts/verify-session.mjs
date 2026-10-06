@@ -39,7 +39,7 @@ async function prompt(sessionId,title,key,content=[]){
  await remote('session/prompt',{sessionId,requestId:randomUUID(),mode:'queue',content:[{type:'text',text:`[VS_SESSION:${key}] 离线验收：在本会话后台规范化制作、检查、导出视频。`},...content]});
  await openSession(sessionId);
  await page.getByText(`[VS_DONE:${key}]`,{exact:false}).first().waitFor({timeout:180000});
- const sessions=await remote('session/list',{});assert.equal(sessions.items.find(s=>s.sessionId===sessionId)?.running,false);
+ let sessions;const settled=Date.now()+20000;do{sessions=await remote('session/list',{});if(!sessions.items.find(s=>s.sessionId===sessionId)?.running)break;await page.waitForTimeout(100);}while(Date.now()<settled);assert.equal(sessions.items.find(s=>s.sessionId===sessionId)?.running,false);
  return studio('current',{sessionId});
 }
 try{
@@ -64,7 +64,10 @@ try{
  assert.equal(manual.project.shots[1].params.text,'真人在工作台修改的镜头文字');await page.screenshot({path:path.join(out,'workbench-focus.png')});
  await page.getByRole('button',{name:/^返回会话/}).click();
  const edited=await prompt(first.sessionId,'视频会话验收 A','READ_MANUAL');assert.equal(edited.project.shots[1].params.text,'真人在工作台修改的镜头文字');assert.equal(edited.project.shots[1].params.subtitle,'模型读取到：真人在工作台修改的镜头文字');assert.deepEqual(edited.project.shots[0],manual.project.shots[0]);
- pass('tool card navigates project/shot/frame; manual editing is read back by the same Session model at its latest revision',{revision:edited.project.revision,frame:3,text:edited.project.shots[1].params.text});
+ await page.getByText('映流 · 视频工作台',{exact:true}).click();await page.getByRole('heading',{name:'会话影片 A',exact:true}).waitFor();
+ const refreshedAt=Date.now()+15000;while((await page.getByLabel('补充文字',{exact:true}).inputValue())!==edited.project.shots[1].params.subtitle&&Date.now()<refreshedAt)await page.waitForTimeout(100);
+ assert.equal(await page.getByLabel('补充文字',{exact:true}).inputValue(),edited.project.shots[1].params.subtitle);
+ pass('tool card navigates project/shot/frame; manual changes reach the same Session, and direct sidebar return refreshes its latest edits',{revision:edited.project.revision,frame:3,text:edited.project.shots[1].params.text,sidebarSubtitle:edited.project.shots[1].params.subtitle});
  const second=await remote('session/create',{workspaceId:workspace.workspace.workspaceId});await remote('session/rename',{sessionId:second.sessionId,title:'视频会话验收 B'});const b=await prompt(second.sessionId,'视频会话验收 B','CREATE_B');
  assert.notEqual(a.project.id,b.project.id);assert.equal((await studio('current',{sessionId:first.sessionId})).project.shots[1].params.text,'真人在工作台修改的镜头文字');assert.equal(b.project.outputs.at(-1).frameCount,24);
  pass('second Session creates and exports its own project without replacing first Session data',{first:first.sessionId,second:second.sessionId,projectA:a.project.id,projectB:b.project.id});

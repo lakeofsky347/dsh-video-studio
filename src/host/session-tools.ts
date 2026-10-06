@@ -20,7 +20,7 @@ function receipt(snapshot:StudioSnapshot,extra:Input={}):Record<string,JsonValue
   return json({kind:'video-studio',projectId:project.id,title:project.title,revision:project.revision,root:snapshot.root,target:project.target,
     topic:project.topic,shotCount:project.shots.length,assets:project.assets,
     shots:project.shots,shotOrder:project.shotOrder,audioClips:project.audioClips??[],
-    task:snapshot.task,outputs:project.outputs,sessionIds:project.sessionIds??project.extensions.sessionIds??[],...extra});
+    task:snapshot.task,outputs:project.outputs,history:snapshot.history,sessionIds:project.sessionIds??project.extensions.sessionIds??[],...extra});
 }
 const output={schema:{type:'object',additionalProperties:true} as const,
   render:(_args:unknown,value:Record<string,JsonValue>)=>[{type:'text' as const,text:JSON.stringify(value)}],
@@ -28,7 +28,7 @@ const output={schema:{type:'object',additionalProperties:true} as const,
 const projectParameter={type:'string' as const,description:'稳定的工程 ID。省略时使用调用会话当前绑定的工程，绝不从别的会话猜工程。'};
 
 /** Bridge session image and verbatim file references into the portable project directory. */
-async function importAttachment(ctx:HostContext,hub:ProjectHub,projectId:string,item:Input,sessionId:string,signal:AbortSignal,audio=false){
+async function importAttachment(ctx:HostContext,hub:ProjectHub,projectId:string,item:Input,sessionId:string,signal:AbortSignal,audio=false,expectedRevision?:number){
   const attachment=record(item.attachment);let input:Input={...item};delete input.attachment;
   if(typeof attachment.attachmentId==='string'){
     if(!ctx.attachments)throw new Error('DSH 附件服务尚未加载');
@@ -42,7 +42,7 @@ async function importAttachment(ctx:HostContext,hub:ProjectHub,projectId:string,
       if(!path)throw new Error('当前 DSH 附件服务无法提供文件路径');input={...input,path,name:item.name??reference.name};
     }
   }
-  signal.throwIfAborted();return hub.call<StudioSnapshot>(audio?'audio':'import',{...input,projectId,sessionId,...(audio?{action:'import'}:{})});
+  signal.throwIfAborted();return hub.call<StudioSnapshot>(audio?'audio':'import',{...input,projectId,sessionId,expectedRevision,...(audio?{action:'import'}:{})});
 }
 
 /** Reuse the DSH job roster, cancellation and durable result notices for slow local rendering. */
@@ -90,8 +90,9 @@ export function createSessionTools(ctx:HostContext,hub:ProjectHub):ToolDefinitio
       async execute(args,exec){
         const sessionId=owner(exec),located=await hub.resolveProject(args,sessionId);exec.signal.throwIfAborted();
         if(args.expectedRevision!==undefined&&args.expectedRevision!==located.snapshot.project!.revision)throw new Error('视频工程已被用户修改，请先 video_project get 后合并修改');
-        for(const item of args.imports??[])await importAttachment(ctx,hub,located.projectId,item,sessionId,exec.signal);
-        const snapshot=await hub.call<StudioSnapshot>('apply',{...args.update,projectId:located.projectId,sessionId});return receipt(snapshot,{sessionId});
+        let revision=located.snapshot.project!.revision;
+        for(const item of args.imports??[]){const imported=await importAttachment(ctx,hub,located.projectId,item,sessionId,exec.signal,false,revision);revision=imported.project!.revision;}
+        const snapshot=await hub.call<StudioSnapshot>('apply',{...args.update,projectId:located.projectId,sessionId,expectedRevision:revision});return receipt(snapshot,{sessionId});
       }}),
     defineTool({name:'video_inspect',description:'读取具体制作要求、源码或实际渲染的指定帧，帮助在会话中检查镜头；frame 是全片零起始整数帧。工具卡片可直接把工作台定位到工程、镜头及帧。仅检查，不会重新创作或改片。',
       parameters:{projectId:projectParameter,shotId:{type:'string'},frame:{type:'integer'},includeSource:{type:'boolean'}},output,

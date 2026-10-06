@@ -13,6 +13,7 @@ import type { StudioSnapshot } from '../src/shared/types.ts';
 const context:HostContext={llm:{listProviders:()=>[],listModels:async()=>[],async *stream(){throw new Error('Session tools must not invoke a second model');}},connection:{fetch:{register:()=>async()=>{}}},effect:()=>{}};
 function execution(name:string,sessionId:string,signal=new AbortController().signal):ToolRunContext{return {name,callId:'test-call',rootCallId:'test-call',arguments:{},token:Symbol('test'),agent:{id:sessionId,options:{provider:'existing-route',model:'existing-model'}},signal};}
 async function run(tools:ToolDefinition[],name:string,args:object,sessionId:string,signal?:AbortSignal){const tool=tools.find(item=>item.name===name)!;return await tool.execute(args,execution(name,sessionId,signal)) as Record<string,any>;}
+async function checkpoint<T>(event:Promise<T>,label:string):Promise<T>{let timer:ReturnType<typeof setTimeout>|undefined;try{return await Promise.race([event,new Promise<T>((_resolve,reject)=>{timer=setTimeout(()=>reject(new Error(`Timed out waiting for ${label}`)),5000);})]);}finally{clearTimeout(timer);}}
 
 test('existing sessions own separate projects; restart restores bindings and focus does not redirect another project',async()=>{
   const base=await mkdtemp(join(tmpdir(),'video-session-hub-'));let hub=new ProjectHub(context,{baseDirectory:base});
@@ -79,14 +80,28 @@ test('background render is a session-owned DSH job with progress and cancel afte
   const ctx:HostContext={...context,jobs:{start(spec:JobSpec){ownerId=spec.owner;hooks=spec.run({id:'video-test-1',append:()=>{},updateProgress:line=>progress.push(line)});return 'video-test-1';}}};
   const hub=new ProjectHub(ctx,{baseDirectory:base}),tools=createSessionTools(ctx,hub);
   try{
-    const project=await run(tools,'video_project',{action:'create'},'session-job'),located=await hub.resolveProject({projectId:project.projectId});let cleaned=false;
+    const project=await run(tools,'video_project',{action:'create'},'session-job'),located=await hub.resolveProject({projectId:project.projectId});let cleaned=false,entered!:()=>void;const checking=new Promise<void>(resolve=>entered=resolve);
     located.service.renderer.check=async(_root,_project,_settings,signal)=>{
       assert.ok(signal);
+      entered();
       await new Promise<void>(resolve=>{const timer=setTimeout(resolve,1000);signal.addEventListener('abort',()=>{clearTimeout(timer);resolve();},{once:true});});cleaned=true;signal.throwIfAborted();return {ok:true,errors:[],frames:[]};
     };
     const response=await run(tools,'video_render',{action:'check'},'session-job');assert.equal(response.jobId,'video-test-1');assert.equal(ownerId,'session-job');
-    await new Promise(resolve=>setTimeout(resolve,50));hooks!.cancel('cancel test');const outcome=await hooks!.done;
+    // Durable task creation can take longer under parallel media tests. Cancel after acquisition.
+    await checkpoint(checking,'renderer.check entry');hooks!.cancel('cancel test');const outcome=await hooks!.done;
     assert.equal(outcome.status,'killed');assert.equal(cleaned,true);assert.ok(progress.length);
-    assert.equal((await hub.call<StudioSnapshot>('current',{projectId:project.projectId})).task!.status,'cancelled');
+    const cancelled=await hub.call<StudioSnapshot>('current',{projectId:project.projectId});assert.equal(cancelled.task!.status,'cancelled');assert.equal(JSON.parse(await readFile(cancelled.task!.logPath!,'utf8')).status,'cancelled');
   }finally{await hub.dispose();await rm(base,{recursive:true,force:true});}
+});
+
+test('session-owned job cancelled during preview setup skips renderer acquisition and records cancellation',async()=>{
+  const base=await mkdtemp(join(tmpdir(),'video-session-early-cancel-'));let hooks:JobHooks|undefined,release!:()=>void;const gate=new Promise<void>(resolve=>release=resolve);
+  const ctx:HostContext={...context,jobs:{start(spec){hooks=spec.run({id:'video-early-cancel',append:()=>{},updateProgress:()=>{}});return 'video-early-cancel';}}},hub=new ProjectHub(ctx,{baseDirectory:base}),tools=createSessionTools(ctx,hub);
+  try{
+    const project=await run(tools,'video_project',{action:'create'},'session-early-cancel'),located=await hub.resolveProject({projectId:project.projectId});let entered!:()=>void,cancelled!:()=>void,checks=0;const preparing=new Promise<void>(resolve=>entered=resolve),abortDelivered=new Promise<void>(resolve=>cancelled=resolve);
+    const rpc=located.service.rpc.bind(located.service);located.service.rpc=async(endpoint,payload)=>{const result=await rpc(endpoint,payload);if(endpoint==='cancel')cancelled();return result;};
+    located.service.renderer.preview=async()=>{entered();await gate;return 'http://127.0.0.1:1/fixture-preview';};located.service.renderer.check=async()=>{checks++;return {ok:true,errors:[],frames:[]};};
+    const response=await run(tools,'video_render',{action:'check'},'session-early-cancel');assert.equal(response.jobId,'video-early-cancel');await checkpoint(preparing,'preview setup entry');hooks!.cancel('cancel before resource acquisition');await checkpoint(abortDelivered,'owned task cancellation');release();
+    const outcome=await hooks!.done;assert.equal(outcome.status,'killed');assert.equal(checks,0,'a cancelled setup must not start a renderer check');const snapshot=await hub.call<StudioSnapshot>('current',{projectId:project.projectId});assert.equal(snapshot.task!.status,'cancelled');assert.equal(JSON.parse(await readFile(snapshot.task!.logPath!,'utf8')).status,'cancelled');
+  }finally{release();await hub.dispose();await rm(base,{recursive:true,force:true});}
 });

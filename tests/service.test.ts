@@ -10,8 +10,8 @@ test('save broken graph, clone current source, restart project without model cal
   try{
     const start=await value(service,'create',{title:'持久化中文项目',topic:'图文到视频'}) as StudioSnapshot;
     const source=await value(service,'source',{shotId:start.project!.shots[0]!.id});source.js+='\n// manual edit kept in duplicate';
-    await service.store.writeSource(start.root!,start.project!.shots[0]!,source);
-    let project=duplicateShot(start.project!,start.project!.shots[0]!.id);const clone=project.shots.at(-1)!;
+    const edited=await value(service,'saveSource',{shotId:start.project!.shots[0]!.id,source,check:false}) as StudioSnapshot;
+    let project=duplicateShot(edited.project!,edited.project!.shots[0]!.id);const clone=project.shots.at(-1)!;
     await value(service,'save',{project});const copied=await value(service,'source',{shotId:clone.id});assert.match(copied.js,/manual edit kept/);
     project=reorderFromGraph(project,[]);const draft=await value(service,'save',{project}) as StudioSnapshot;assert.equal(draft.project!.shotOrder.length,0);assert.equal(draft.previewRevision,null);
     const preview=await service.rpc('preview',{});assert.equal(preview.ok,false);

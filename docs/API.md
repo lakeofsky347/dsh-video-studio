@@ -158,3 +158,21 @@ TTS 是独立能力，不把 ctx.llm 当作音频接口。本地适配为 macOS 
 ### 精确帧与预览
 
 `inspect` 使用当前项目源码在 Playwright 中调用同一 `ready()` / `renderFrame({frame,fps})`，保存真实 PNG。frame 为全片零起始帧，输出包含对应 shotId、文件路径、URL 与 SHA-256。工作台关键帧也运行同一代码。实时播放含音轨时使用音频 currentTime 作为时钟；任意帧定位、冷启动和导出仍使用帧号确定画面。
+# 0.3.0 工程管理与制作记录
+
+既有视频工具保持原有职责，当前 Session 的模型仍直接提交分镜和源码。写入支持 `expectedRevision`；提供时在实际提交前检查，过期请求返回 `REVISION_CONFLICT`。`video_update` 在导入素材后继续使用本次已确认 revision 提交，不会跳过服务侧冲突检查。
+
+| RPC | 输入 | 返回 |
+| --- | --- | --- |
+| `list` | `includeArchived?:boolean` | `{projects:[{id,path,title,createdAt?,updatedAt?,archived?,archivedAt?}],sessions,selected?}` |
+| `rename` | `projectId,title,expectedRevision?` | 当前工程 `StudioSnapshot` |
+| `duplicate` | `projectId,title?` | 新工程 `StudioSnapshot`；新 ID，不复制 Session、输出及历史 |
+| `archive` / `restore` | `projectId` | 当前选中工程或空工程的 `StudioSnapshot`；归档不删除文件 |
+| `history` | `projectId` | `{canUndo,canRedo,cursor,entries:[{id,label,createdAt,revision}]}` |
+| `undo` / `redo` | `projectId,expectedRevision?` | 内容恢复后的 `StudioSnapshot`；revision 递增 |
+| `tasks` / `jobs` | `projectId` | `{tasks:[TaskState & {retryable,revision?,retryOf?}]}` |
+| `retry` / `job.retry` | `projectId,taskId,expectedRevision?` | 新任务的 `StudioSnapshot`，使用当前工程 |
+
+同一工程的写请求和后台提交排队。工程及全部镜头源码以完整版本保存；状态指针切换是提交点，投影中断可在重开时修复。旧工程首次打开迁移到该协议，schemaVersion 仍为 1。导出以指定 revision 读取源码，历史镜头删除或移动源码路径后仍可复核旧输入。
+
+任务执行前保存记录，结束保存状态；重启将未完成记录标为 `interrupted`。只允许插件自己记录的预览、导出和生成请求由用户重试，配音不自动重放。没有逐帧断点续渲或跨进程工程锁。

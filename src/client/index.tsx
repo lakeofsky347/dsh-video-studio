@@ -25,7 +25,7 @@ export function apply(ctx:ClientContext):void {
   const abort=new AbortController();
   const controller=new StudioController(new RpcStudioApi(ctx.connection.rpc,abort.signal));
   ctx.effect(()=>()=>{void controller.dispose().finally(()=>abort.abort());},'video-studio: plugin lifetime');
-  ctx.effect(()=>{const flush=()=>{void controller.flush();};window.addEventListener('pagehide',flush);window.addEventListener('blur',flush);return()=>{window.removeEventListener('pagehide',flush);window.removeEventListener('blur',flush);};},'video-studio: save on leaving');
+  ctx.effect(()=>{const flush=()=>{controller.persistDrafts();void controller.flush();};window.addEventListener('pagehide',flush);window.addEventListener('blur',flush);return()=>{window.removeEventListener('pagehide',flush);window.removeEventListener('blur',flush);};},'video-studio: save on leaving');
   ctx.effect(()=>ctx.locale.register('video-studio',{zh:{panel:'映流 · 视频工作台',project:'视频工程',update:'更新视频',inspect:'检查镜头与帧',render:'渲染视频',audio:'制作音频',preparing:'准备调用',running:'正在执行',submitted:'已提交后台任务',complete:'已完成',failed:'执行失败',open:'打开工作台',frame:'查看指定帧',return:'返回会话',details:'查看调用记录'},en:{panel:'Video Studio',project:'Video project',update:'Update video',inspect:'Inspect shots and frames',render:'Render video',audio:'Produce audio',preparing:'Preparing',running:'Running',submitted:'Submitted to background job',complete:'Completed',failed:'Failed',open:'Open studio',frame:'View frame',return:'Return to session',details:'Call details'}}),'video-studio: copy');
   const t=ctx.locale.bind('video-studio');
   const syncTheme=()=>controller.setScheme(ctx.theme?.getTheme().active.colorScheme||(document.body.hasAttribute('data-ds-dark-theme')?'dark':'light'));

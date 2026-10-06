@@ -4,7 +4,7 @@ import {readFile,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-const root=path.resolve('artifacts/verification/v0.2'),reportPath=path.join(root,'native/restart.json');
+const root=path.resolve(process.env.DSH_ACCEPTANCE_ROOT??'artifacts/verification/v0.2'),reportPath=path.join(root,'native/restart.json');
 const report=JSON.parse(await readFile(reportPath,'utf8')),session=JSON.parse(await readFile(path.join(root,'native-session/session-acceptance.json'),'utf8'));
 assert.equal(report.status,'PASS');assert.equal(report.archiveSha256,session.archiveSha256);
 const api=await request.newContext(),url=process.env.DSH_TEST_URL;assert.ok(url);await api.get(url);

@@ -45,8 +45,18 @@ export interface VideoSpec {
 export interface SceneSource { html:string; css:string; js:string; shotPatch?:Partial<Shot> }
 export interface TaskState {
   id:string; kind:'storyboard'|'scenes'|'modify'|'preview'|'export'|'audio';
-  status:'running'|'complete'|'failed'|'cancelled'; progress:number; message:string;
+  status:'running'|'complete'|'failed'|'cancelled'|'interrupted'; progress:number; message:string;
   startedAt:string; finishedAt?:string; error?:string; shotId?:string; logPath?:string;
+  revision?:number; retryOf?:string;
+}
+export interface TaskRecord extends TaskState { retryable:boolean }
+export interface ProjectHistory {
+  canUndo:boolean;canRedo:boolean;cursor:number;
+  entries:{id:string;label:string;createdAt:string;revision:number}[];
+}
+export interface ProjectLocation {
+  id:string;path:string;title:string;createdAt?:string;updatedAt?:string;
+  archived?:boolean;archivedAt?:string;
 }
 export interface EnvironmentSettings { browserPath:string; ffmpegPath:string; ffprobePath:string }
 export interface EnvironmentInfo extends EnvironmentSettings { browserAvailable:boolean; ffmpegAvailable:boolean; ffprobeAvailable:boolean }
@@ -56,6 +66,7 @@ export interface StudioSnapshot {
   previewUrl:string|null; previewRevision:number|null; assetBaseUrl?:string|null; providers:ProviderGroup[];
   environment:EnvironmentInfo; recent:{path:string;title:string;id:string}[];
   sessionId?:string;focus?:{shotId?:string;frame?:number};audioUrl?:string|null;tts?:TtsSettings;ttsConfigured?:boolean;
+  projects?:ProjectLocation[];history?:ProjectHistory;
 }
 export type RpcResult<T=unknown>={ok:true;value:T}|{ok:false;error:{code:string;message:string}};
 export interface ClientRpc { call(channel:string,endpoint:string,payload:unknown,signal?:AbortSignal):Promise<RpcResult> }

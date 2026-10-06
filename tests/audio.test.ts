@@ -33,7 +33,7 @@ test('audio import probes actual media, persists relative paths and rejects vide
   try{
     const store=new ProjectStore({baseDirectory:folder}),created=await store.create(shortProject()),file=path.join(folder,'声音.wav'),bytes=await fixture(file);
     const asset=await store.importAsset(created.root,{path:file,name:'真实配音'},env);assert.equal(asset.kind,'audio');assert.equal(asset.mime,'audio/wav');assert.equal(asset.sampleRate,48000);assert.equal(asset.channels,1);assert.ok(Math.abs(asset.duration!-1)<.001);assert.match(asset.path!,/^assets\/[^/]+\.wav$/);
-    assert.deepEqual(await fs.readFile(path.join(created.root,asset.path!)),bytes);created.project.assets.push(asset);await store.save(created.root,created.project);assert.equal((await new ProjectStore({baseDirectory:folder}).open(created.root)).assets[0]!.duration,asset.duration);
+    assert.deepEqual(await fs.readFile(path.join(created.root,asset.path!)),bytes);created.project.assets.push(asset);created.project.revision++;created.project=await store.commit(created.root,created.project);assert.equal((await new ProjectStore({baseDirectory:folder}).open(created.root)).assets[0]!.duration,asset.duration);
     const base64=await store.importAsset(created.root,{dataBase64:bytes.toString('base64'),mime:'audio/wav',name:'HTTP字节'},env);assert.equal(base64.kind,'audio');
     for(const extension of ['mp3','m4a','aac','flac','ogg']){
       const encoded=path.join(folder,'fixture.'+extension);await exec(env.ffmpegPath,['-hide_banner','-loglevel','error','-y','-i',file,encoded]);

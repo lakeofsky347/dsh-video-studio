@@ -124,7 +124,7 @@ export class VideoRenderer {
     await fs.mkdir(await projectPath(root,'runtime/scenes'),{recursive:true});
     for(const shot of spec.shots){
       try{
-        const source=await this.store.readSource(root,shot);safeId(shot.id);
+        const source=await this.store.readSource(root,shot,project.revision);safeId(shot.id);
         // ESM modules are files served under a restrictive self-only CSP; no privileged APIs are exposed.
         await fs.writeFile(await projectPath(root,'runtime/scenes/'+shot.id+'.mjs'),source.js);
         sources.push({id:shot.id,html:source.html,css:source.css,moduleUrl:'./scenes/'+shot.id+'.mjs'});
@@ -138,7 +138,10 @@ export class VideoRenderer {
   private async openPage(url:string,spec:VideoSpec,settings:EnvironmentSettings,issues:RenderIssue[],signal?:AbortSignal):Promise<{browser:Browser;page:Page;removeAbort:()=>void}> {
     aborted(signal);const env=detectEnvironment(settings);if(!env.browserAvailable)throw new Error('Chrome/Chromium unavailable. Set browserPath in environment settings.');
     await fs.access(env.browserPath,constants.X_OK);
-    const browser=await chromium.launch({executablePath:env.browserPath,headless:true,args:['--disable-background-timer-throttling','--disable-renderer-backgrounding']});this.browsers.add(browser);
+    // 逐帧契约要求同一帧可复现：GPU 光栅的 2D canvas 在不同页面状态下会出现 ±1 的采样差异，
+    // 会让逆序 seek / 冷启动的字节比对偶发失败。固定用 Skia 软件光栅画 2D canvas，
+    // 合成与 WebGL 仍走原路径，渲染结果与截图因此稳定可复现。
+    const browser=await chromium.launch({executablePath:env.browserPath,headless:true,args:['--disable-background-timer-throttling','--disable-renderer-backgrounding','--disable-accelerated-2d-canvas']});this.browsers.add(browser);
     const cancel=()=>{void browser.close().catch(()=>{});};signal?.addEventListener('abort',cancel,{once:true});
     try {
       const context=await browser.newContext({viewport:{width:spec.target.width,height:spec.target.height},deviceScaleFactor:1,serviceWorkers:'block'});
@@ -229,7 +232,7 @@ export class VideoRenderer {
       const bytes=await fs.readFile(source);await fs.writeFile(destination,bytes);inputHashes.push({path:asset.path,sha256:hash(bytes)});
     }
     for(const shot of snapshot.shots){
-      const source=await this.store.readSource(root,shot);await this.store.writeSource(snapshotRoot,shot,source);
+      const source=await this.store.readSource(root,shot,project.revision);await this.store.writeSource(snapshotRoot,shot,source);
       inputHashes.push({path:shot.sourcePath+'/source.json',sha256:hash(json(source))});
     }
     const spec=await this.prepare(snapshotRoot,snapshot),errors:RenderIssue[]=[],frames:FrameCapture[]=[];
