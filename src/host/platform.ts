@@ -2,6 +2,12 @@ import type { ToolDefinition } from '@deepseek-ai/dsh-tools';
 import type { JobSpec, JobId } from '@deepseek-ai/dsh-jobs';
 import type { ImageAttachmentRef, FileAttachmentRef } from '@deepseek-ai/dsh-attachment';
 
+/** Cold Session catalog facts needed for routing; forks do not carry origin=subagent. */
+export interface SessionDirectoryRow {
+  sessionId:string;running:boolean;parentSessionId?:string;origin?:'subagent';
+  projections?:{values:Record<string,unknown>};
+}
+
 export interface HostContext {
   llm:{
     listProviders():{id:string;name:string}[];
@@ -12,6 +18,10 @@ export interface HostContext {
   get?(name:string):unknown;
   tools?:{register(definition:ToolDefinition):()=>void};
   jobs?:{start(spec:JobSpec):JobId};
+  sessionController?:{
+    list(request:Record<string,never>,signal:AbortSignal):Promise<{items:readonly SessionDirectoryRow[]}>;
+    projections?(request:{sessionId:string},signal:AbortSignal):Promise<{values:Record<string,unknown>}|null>;
+  };
   attachments?:{
     readImage(ref:ImageAttachmentRef,signal?:AbortSignal):Promise<{data:Uint8Array}>;
     fileHostPath(ref:FileAttachmentRef):string|undefined;

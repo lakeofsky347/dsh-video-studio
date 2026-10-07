@@ -58,6 +58,11 @@ export interface ProjectLocation {
   id:string;path:string;title:string;createdAt?:string;updatedAt?:string;
   archived?:boolean;archivedAt?:string;
 }
+/** Host-local conversation routing, independent of portable film content revisions. */
+export interface SessionBinding {
+  currentProjectId?:string;relatedProjectIds:string[];updatedAt:string;
+}
+export type SessionBindings=Record<string,SessionBinding>;
 export interface EnvironmentSettings { browserPath:string; ffmpegPath:string; ffprobePath:string }
 export interface EnvironmentInfo extends EnvironmentSettings { browserAvailable:boolean; ffmpegAvailable:boolean; ffprobeAvailable:boolean }
 export interface ProviderGroup { id:string; name:string; models:{id:string;name:string;inputModalities?:string[]}[]; error?:string }
@@ -67,6 +72,8 @@ export interface StudioSnapshot {
   environment:EnvironmentInfo; recent:{path:string;title:string;id:string}[];
   sessionId?:string;focus?:{shotId?:string;frame?:number};audioUrl?:string|null;tts?:TtsSettings;ttsConfigured?:boolean;
   projects?:ProjectLocation[];history?:ProjectHistory;
+  bindings?:SessionBindings;relatedSessionIds?:string[];currentSessionIds?:string[];
+  routing?:{callerSessionId?:string;ownerSessionId?:string;routingSource:string};
 }
 export type RpcResult<T=unknown>={ok:true;value:T}|{ok:false;error:{code:string;message:string}};
 export interface ClientRpc { call(channel:string,endpoint:string,payload:unknown,signal?:AbortSignal):Promise<RpcResult> }

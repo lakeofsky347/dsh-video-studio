@@ -20,8 +20,8 @@ test('library rename, independent copy, archive and restore survive restart with
   assert.equal(copy.project!.assets[0]!.text,'保留的文本素材');assert.deepEqual(await hub.call('source',{projectId:copy.project!.id,shotId}),source);
   await hub.call('archive',{projectId:id});const listed=await hub.call<{projects:ProjectLocation[]}>('list');assert.equal(listed.projects.some(p=>p.id===id),false);
   const all=await hub.call<{projects:ProjectLocation[]}>('list',{includeArchived:true});assert.equal(all.projects.find(p=>p.id===id)!.archived,true);assert.ok(all.projects.find(p=>p.id===id)!.archivedAt);
-  const index=JSON.parse(await readFile(join(base,'sessions.json'),'utf8'));assert.equal(index.sessions['original-session'],id);
-  await hub.dispose();hub=new ProjectHub(context,{baseDirectory:base});const restored=await hub.call<StudioSnapshot>('restore',{projectId:id});assert.equal(restored.project!.title,'重命名影片');assert.ok(restored.project!.sessionIds!.includes('original-session'));assert.deepEqual(await hub.call('source',{projectId:id,shotId}),source);
+  const index=JSON.parse(await readFile(join(base,'sessions.json'),'utf8'));assert.equal(index.bindings['original-session'].currentProjectId,id);
+  await hub.dispose();hub=new ProjectHub(context,{baseDirectory:base});const restored=await hub.call<StudioSnapshot>('restore',{projectId:id});assert.equal(restored.project!.title,'重命名影片');assert.ok(restored.relatedSessionIds!.includes('original-session'));assert.deepEqual(await hub.call('source',{projectId:id,shotId}),source);
   const current=await hub.call<StudioSnapshot>('current',{sessionId:'original-session'});assert.equal(current.project!.id,id);
  }finally{await hub.dispose();await rm(base,{recursive:true,force:true});}
 });
@@ -36,7 +36,7 @@ test('concurrent lazy project reads share one service and preserve explicit Sess
  }finally{await hub.dispose();await rm(base,{recursive:true,force:true});}
 });
 
-test('rebinding a Session removes the old return link, preserves other bindings and survives archive/restart',async()=>{
+test('changing a Session current project retains related projects and survives archive/restart',async()=>{
  const base=await mkdtemp(join(tmpdir(),'dsh-library-rebind-'));let hub=new ProjectHub(context,{baseDirectory:base});
  try{
   const a=await hub.call<StudioSnapshot>('create',{title:'A',sessionId:'moving-session'}),aId=a.project!.id;
@@ -45,8 +45,8 @@ test('rebinding a Session removes the old return link, preserves other bindings 
   await hub.call('archive',{projectId:aId});await hub.dispose();hub=new ProjectHub(context,{baseDirectory:base});
   await hub.call('bindSession',{projectId:bId,sessionId:'moving-session'});
   const restored=await hub.call<StudioSnapshot>('restore',{projectId:aId});
-  assert.deepEqual(restored.project!.sessionIds,['retained-session']);assert.deepEqual(restored.project!.extensions.sessionIds,['retained-session']);assert.equal(restored.sessionId,'retained-session');
-  const wrong=await hub.call<StudioSnapshot>('focus',{projectId:aId,sessionId:'moving-session'});assert.equal(wrong.sessionId,'retained-session');
+  assert.deepEqual(restored.relatedSessionIds,['moving-session','retained-session']);assert.deepEqual(restored.currentSessionIds,['retained-session']);assert.equal(restored.sessionId,undefined);
+  const previous=await hub.call<StudioSnapshot>('focus',{projectId:aId,sessionId:'moving-session'});assert.equal(previous.sessionId,'moving-session');assert.deepEqual(previous.currentSessionIds,['retained-session']);
   assert.equal((await hub.call<StudioSnapshot>('current',{sessionId:'moving-session'})).project!.id,bId);
   await hub.dispose();hub=new ProjectHub(context,{baseDirectory:base});
   assert.equal((await hub.call<StudioSnapshot>('current',{sessionId:'moving-session'})).project!.id,bId);

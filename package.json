@@ -1,6 +1,6 @@
 {
   "name": "dsh-video-studio",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "license": "MIT",
   "description": "DSH 视频工作台：图文分镜、前端代码生成与编辑、本地 MP4 导出",
@@ -32,7 +32,9 @@
         "@deepseek-ai/dsh-client-ui-theme",
         "@deepseek-ai/dsh-client-ui-tool",
         "@deepseek-ai/dsh-client-ui-workspace",
-        "@deepseek-ai/dsh-client-ui-session"
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-api-workspace-controller"
       ]
     }
   },
@@ -49,7 +51,9 @@
     "@deepseek-ai/dsh-attachment": "0.2.0-rc.2",
     "@deepseek-ai/dsh-client-ui-tool": "0.2.0-rc.2",
     "@deepseek-ai/dsh-client-ui-workspace": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-client-ui-session": "0.2.0-rc.2"
+    "@deepseek-ai/dsh-client-ui-session": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-api-session-controller": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-api-workspace-controller": "0.2.0-rc.2"
   },
   "dependencies": {
     "playwright-core": "1.63.0"

@@ -1,13 +1,15 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { ProviderGroup, RpcResult, StudioSnapshot, VideoProject, TtsSettings } from '../shared/types.ts';
-import type { HostContext } from './platform.ts';
+import type { ProviderGroup, RpcResult, StudioSnapshot, VideoProject, TtsSettings, SessionBinding } from '../shared/types.ts';
+import type { HostContext, SessionDirectoryRow } from './platform.ts';
 import { StudioService } from './service.ts';
 
 export interface StudioFocus { shotId?:string; frame?:number }
 export type ProjectLocation = import('../shared/types.ts').ProjectLocation;
-interface HubIndex { version:1; selected?:string; projects:ProjectLocation[]; sessions:Record<string,string> }
+interface HubIndex { version:2; selected?:string; projects:ProjectLocation[]; bindings:Record<string,SessionBinding> }
+export interface ProjectRouting {callerSessionId?:string;ownerSessionId?:string;routingSource:'explicit-project'|'session-binding'|'subagent-ancestor'|'selected-project'}
+interface CallContext {callerSessionId?:string}
 type Input=Record<string,unknown>;
 type HubSnapshot=StudioSnapshot & {sessionId?:string;focus?:StudioFocus;projects:ProjectLocation[]};
 
@@ -22,7 +24,7 @@ export class ProjectHub {
   private openings:Promise<unknown>=Promise.resolve();
   private disposed=false;
   private bootstrap:StudioService;
-  private index:HubIndex={version:1,projects:[],sessions:{}};
+  private index:HubIndex={version:2,projects:[],bindings:{}};
   private initialized:Promise<void>;
   private writes:Promise<void>=Promise.resolve();
   private selectedSession?:string;
@@ -37,9 +39,15 @@ export class ProjectHub {
   }
   private makeService(restoreRecent=false){return new StudioService(this.ctx,{baseDirectory:this.baseDirectory,restoreRecent});}
   private async initialize(){
+    let migrated=false;
     try{
       const saved=JSON.parse(await readFile(join(this.baseDirectory,'sessions.json'),'utf8'));
-      if(saved.version===1&&Array.isArray(saved.projects)&&saved.sessions&&typeof saved.sessions==='object')this.index=saved;
+      if(saved.version===2&&Array.isArray(saved.projects)&&saved.bindings&&typeof saved.bindings==='object')this.index=saved;
+      else if(saved.version===1&&Array.isArray(saved.projects)&&saved.sessions&&typeof saved.sessions==='object'){
+        const updatedAt=new Date().toISOString();
+        this.index={version:2,selected:saved.selected,projects:saved.projects,bindings:Object.fromEntries(Object.entries(saved.sessions).filter((entry):entry is [string,string]=>typeof entry[1]==='string').map(([id,projectId])=>[id,{currentProjectId:projectId,relatedProjectIds:[projectId],updatedAt}]))};
+        migrated=true;
+      }
     }catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
     const current=await this.bootstrap.snapshot();
     this.providers=current.providers;this.tts=current.tts;this.ttsConfigured=current.ttsConfigured;
@@ -49,29 +57,27 @@ export class ProjectHub {
     if(selected){
       this.index.selected=undefined;
       for(const candidate of [selected,...this.index.projects.filter(item=>!item.archived&&item.id!==selected.id)]){
-        try{const service=await this.service(candidate.id),opened=await service.snapshot();this.index.selected=candidate.id;if(opened.project)for(const id of this.projectSessions(opened.project))if(!this.index.sessions[id])this.index.sessions[id]=opened.project.id;break;}catch{/* A moved/damaged project must not disable the project picker. */}
+        try{await this.service(candidate.id);this.index.selected=candidate.id;break;}catch{/* A moved/damaged project must not disable the project picker. */}
       }
     }
+    if(migrated)await this.updateIndex(()=>{});
   }
-  private projectSessions(project:VideoProject):string[]{
-    const values=project.sessionIds??project.extensions.sessionIds;
-    return Array.isArray(values)?values.filter((item):item is string=>typeof item==='string'):[];
-  }
-  private saveIndex(){
+  /** Publish a candidate only after its atomic file replacement succeeds. */
+  private updateIndex(change:(index:HubIndex)=>void){
     this.writes=this.writes.catch(()=>{}).then(async()=>{
+      const candidate=structuredClone(this.index);change(candidate);
       await mkdir(this.baseDirectory,{recursive:true});
       const file=join(this.baseDirectory,'sessions.json'),temporary=file+'.tmp';
-      await writeFile(temporary,JSON.stringify(this.index,null,2)+'\n');await rename(temporary,file);
+      await writeFile(temporary,JSON.stringify(candidate,null,2)+'\n');await rename(temporary,file);
+      this.index=candidate;
     });return this.writes;
   }
   private async remember(snapshot:StudioSnapshot){
     if(!snapshot.project||!snapshot.root)return;
     const saved=this.index.projects.find(item=>item.id===snapshot.project!.id);
     const entry:ProjectLocation={...saved,id:snapshot.project.id,path:snapshot.root,title:snapshot.project.title,createdAt:snapshot.project.createdAt,updatedAt:snapshot.project.updatedAt};
-    const previous=this.index.projects.findIndex(item=>item.id===entry.id);
-    if(previous>=0&&JSON.stringify(this.index.projects[previous])===JSON.stringify(entry))return;
-    if(previous<0)this.index.projects.push(entry);else this.index.projects[previous]=entry;
-    await this.saveIndex();
+    if(saved&&JSON.stringify(saved)===JSON.stringify(entry))return;
+    await this.updateIndex(index=>{const previous=index.projects.findIndex(item=>item.id===entry.id);if(previous<0)index.projects.push(entry);else index.projects[previous]=entry;});
   }
   private async service(projectId?:string,includeArchived=false):Promise<StudioService>{
     const id=projectId??this.index.selected;
@@ -88,93 +94,195 @@ export class ProjectHub {
     this.pendingServices.set(id,pending);
     try{return await pending;}finally{this.pendingServices.delete(id);}
   }
-  private async bind(service:StudioService,sessionId:string){
+  private sessions(){return Object.fromEntries(Object.entries(this.index.bindings).flatMap(([id,binding])=>binding.currentProjectId?[[id,binding.currentProjectId]]:[]));}
+  private async directory(targetSessionId?:string,signal=new AbortController().signal):Promise<Map<string,SessionDirectoryRow>|undefined>{
+    if(!this.ctx.sessionController)return undefined;
+    const listed=await this.ctx.sessionController.list({},signal),rows=new Map(listed.items.map(row=>[row.sessionId,row]));
+    const complete=()=>!(targetSessionId&&!rows.has(targetSessionId))&&![...rows.values()].some(row=>row.origin==='subagent'&&row.parentSessionId&&!rows.has(row.parentSessionId));
+    if(complete()||!this.ctx.sessionController.projections)return rows;
+    // Persisted children without cwd may be omitted by session/list. The parent's
+    // authenticated catalog supplies their delegation edge without activating them.
+    const inspected=new Set<string>(),baselines=new Map<string,Record<string,unknown>>();
+    for(const row of rows.values())if(row.projections)baselines.set(row.sessionId,row.projections.values);
+    let pending=[...rows.keys()];
+    while(pending.length){
+      const batch=pending.filter(id=>!inspected.has(id));pending=[];
+      await Promise.all(batch.map(async parentId=>{
+        inspected.add(parentId);signal.throwIfAborted();
+        const cached=baselines.get(parentId);
+        const values=Array.isArray(cached?.subagentCatalog)?cached:(await this.ctx.sessionController!.projections!({sessionId:parentId},signal))?.values;
+        const children=values?.subagentCatalog;if(!Array.isArray(children))return;
+        await Promise.all(children.map(async child=>{
+          const id=record(child).id;if(typeof id!=='string'||id===parentId)return;
+          if(!rows.has(id)){
+            const baseline=await this.ctx.sessionController!.projections!({sessionId:id},signal);if(!baseline)return;
+            baselines.set(id,baseline.values);rows.set(id,{sessionId:id,running:false,origin:'subagent',parentSessionId:parentId});
+          }
+          if(!inspected.has(id))pending.push(id);
+        }));
+      }));
+      if(complete())break;
+    }
+    return rows;
+  }
+  /** Traverse only actual delegation links. A fork's parent is historical context, not ownership. */
+  private bindingOwner(sessionId:string,rows?:Map<string,SessionDirectoryRow>):{ownerSessionId:string;projectId?:string}{
+    let id=sessionId;const visited=new Set<string>();
+    while(!visited.has(id)){
+      visited.add(id);const binding=this.index.bindings[id];
+      // An explicit empty choice is a boundary too: removing a child's current
+      // project must not silently redirect its next call to an ancestor.
+      if(binding)return {ownerSessionId:id,projectId:binding.currentProjectId};
+      const row=rows?.get(id);if(row?.origin!=='subagent'||!row.parentSessionId)break;
+      id=row.parentSessionId;
+    }
+    return {ownerSessionId:sessionId};
+  }
+  private async assertBindingChange(sessionId:string,rows:Map<string,SessionDirectoryRow>|undefined,callerSessionId?:string){
     if(!sessionId.trim())throw new Error('请选择关联会话');
-    const snapshot=await service.snapshot(),project=snapshot.project;if(!project)throw new Error('请先创建或打开视频工程');
-    const previousId=this.index.sessions[sessionId];
-    if(previousId&&previousId!==project.id){
-      const previousService=await this.service(previousId,true),previous=await previousService.snapshot();
-      if(previous.project&&this.projectSessions(previous.project).includes(sessionId)){
-        const retained=this.projectSessions(previous.project).filter(id=>id!==sessionId);
-        resultValue(await previousService.rpc('save',{expectedRevision:previous.project.revision,project:{...previous.project,sessionIds:retained,extensions:{...previous.project.extensions,sessionIds:retained}}}));
-        await this.remember(await previousService.snapshot());
+    if(!rows)return;
+    const target=rows.get(sessionId);if(!target)throw Object.assign(new Error('此会话已不可用，请刷新会话列表'),{code:'SESSION_NOT_FOUND'});
+    for(const row of rows.values()){
+      if(!row.running)continue;
+      let id=row.sessionId;const visited=new Set<string>();
+      while(!visited.has(id)){
+        visited.add(id);
+        if(id===sessionId){
+          // A tool may establish its own first project during its active turn.
+          if(row.sessionId===callerSessionId&&sessionId===callerSessionId)break;
+          throw Object.assign(new Error('此会话或其子代理仍在执行，请结束当前回合后切换或解除工程关联'),{code:'SESSION_BUSY'});
+        }
+        const ancestor=rows.get(id);if(ancestor?.origin!=='subagent'||!ancestor.parentSessionId)break;
+        // Independently bound children do not operate the ancestor's default project.
+        if(this.index.bindings[id])break;
+        id=ancestor.parentSessionId;
       }
     }
-    const sessions=[...new Set([...this.projectSessions(project),sessionId])];
-    if(!this.projectSessions(project).includes(sessionId))resultValue(await service.rpc('save',{expectedRevision:project.revision,project:{...project,sessionIds:sessions,extensions:{...project.extensions,sessionIds:sessions}}}));
-    this.index.sessions[sessionId]=project.id;await this.saveIndex();
   }
+  private async bind(service:StudioService,sessionId:string,data:Input={},context:CallContext={}){
+    const snapshot=await service.snapshot(),project=snapshot.project;if(!project)throw new Error('请先创建或打开视频工程');
+    const rows=await this.directory(sessionId);
+    if(rows&&!rows.has(sessionId))throw Object.assign(new Error('此会话已不可用，请刷新会话列表'),{code:'SESSION_NOT_FOUND'});
+    const current=this.index.bindings[sessionId]?.currentProjectId;
+    if(current!==project.id)await this.assertBindingChange(sessionId,rows,context.callerSessionId);
+    await this.updateIndex(index=>{
+      const previous=index.bindings[sessionId];
+      if(Object.hasOwn(data,'expectedCurrentProjectId')&&(previous?.currentProjectId??null)!==(data.expectedCurrentProjectId??null))
+        throw Object.assign(new Error('会话当前工程已改变，请刷新后重新关联'),{code:'BINDING_CONFLICT'});
+      if(data.select!==false)index.selected=project.id;
+      if(previous?.currentProjectId===project.id&&previous.relatedProjectIds.includes(project.id))return;
+      index.bindings[sessionId]={currentProjectId:project.id,relatedProjectIds:[...new Set([...(previous?.relatedProjectIds??[]),project.id])],updatedAt:new Date().toISOString()};
+    });
+    if(data.select!==false){this.selectedSession=sessionId;this.focus=undefined;}
+  }
+  private async unbind(projectId:string,sessionId:string,data:Input={},context:CallContext={}){
+    const previous=this.index.bindings[sessionId];if(!previous?.relatedProjectIds.includes(projectId))return;
+    // Stale/deleted Sessions can still be detached from the local index.
+    const rows=await this.directory(sessionId);if(previous.currentProjectId===projectId&&(!rows||rows.has(sessionId)))await this.assertBindingChange(sessionId,rows,context.callerSessionId);
+    await this.updateIndex(index=>{
+      const binding=index.bindings[sessionId];if(!binding)return;
+      if(Object.hasOwn(data,'expectedCurrentProjectId')&&(binding.currentProjectId??null)!==(data.expectedCurrentProjectId??null))
+        throw Object.assign(new Error('会话当前工程已改变，请刷新后重新关联'),{code:'BINDING_CONFLICT'});
+      const relatedProjectIds=binding.relatedProjectIds.filter(id=>id!==projectId);
+      index.bindings[sessionId]={...binding,currentProjectId:binding.currentProjectId===projectId?undefined:binding.currentProjectId,relatedProjectIds,updatedAt:new Date().toISOString()};
+    });
+    if(this.selectedSession===sessionId&&!this.index.bindings[sessionId]?.relatedProjectIds.includes(projectId))this.selectedSession=undefined;
+  }
+  private async selectProject(projectId:string,sessionId?:string){await this.updateIndex(index=>{index.selected=projectId;});this.selectedSession=sessionId;this.focus=undefined;}
   private async decorate(service:StudioService,sessionId?:string):Promise<HubSnapshot>{
     const snapshot=await service.snapshot();
     const selected=snapshot.project?.id===this.index.selected;
-    const linked=(id:string|undefined)=>id&&this.index.sessions[id]===snapshot.project?.id?id:undefined;
-    const activeSession=linked(sessionId)??linked(selected?this.selectedSession:undefined)??Object.keys(this.index.sessions).find(id=>this.index.sessions[id]===snapshot.project?.id);
-    return {...snapshot,providers:this.providers,tts:this.tts??snapshot.tts,ttsConfigured:this.ttsConfigured??snapshot.ttsConfigured,sessionId:activeSession,focus:selected?this.focus:undefined,projects:structuredClone(this.index.projects.filter(item=>!item.archived)),recent:snapshot.recent.filter(item=>!this.index.projects.find(entry=>entry.id===item.id)?.archived)};
+    const relatedSessionIds=Object.keys(this.index.bindings).filter(id=>this.index.bindings[id]!.relatedProjectIds.includes(snapshot.project?.id??''));
+    const currentSessionIds=relatedSessionIds.filter(id=>this.index.bindings[id]!.currentProjectId===snapshot.project?.id);
+    const linked=(id:string|undefined)=>id&&relatedSessionIds.includes(id)?id:undefined;
+    const activeSession=linked(sessionId)??linked(selected?this.selectedSession:undefined);
+    return {...snapshot,providers:this.providers,tts:this.tts??snapshot.tts,ttsConfigured:this.ttsConfigured??snapshot.ttsConfigured,sessionId:activeSession,relatedSessionIds,currentSessionIds,bindings:structuredClone(this.index.bindings),focus:selected?this.focus:undefined,projects:structuredClone(this.index.projects.filter(item=>!item.archived)),recent:snapshot.recent.filter(item=>!this.index.projects.find(entry=>entry.id===item.id)?.archived)};
+  }
+  /** Directory-only routing metadata also works before a project is created. */
+  async sessionRouting(sessionId:string,signal?:AbortSignal):Promise<{projectId?:string;routing:ProjectRouting;requiresRevision:boolean}>{
+    await this.initialized;const rows=await this.directory(sessionId,signal),bound=this.bindingOwner(sessionId,rows);
+    const row=rows?.get(sessionId),team=record(row?.projections?.values.agentTeam);
+    const teamLead=Array.isArray(team.members)&&team.members.some(member=>record(member).role==='teammate');
+    const sharedWorker=!!bound.projectId&&[...(rows?.values()??[])].some(worker=>{
+      if(worker.origin!=='subagent'||worker.sessionId===sessionId)return false;
+      const owner=this.bindingOwner(worker.sessionId,rows);return owner.ownerSessionId===sessionId&&owner.projectId===bound.projectId;
+    });
+    return {projectId:bound.projectId,routing:{callerSessionId:sessionId,ownerSessionId:bound.ownerSessionId,routingSource:bound.ownerSessionId===sessionId?'session-binding':'subagent-ancestor'},requiresRevision:row?.origin==='subagent'||teamLead||sharedWorker};
   }
   /** Resolve by explicit project or session; never silently reuse another session's project. */
-  async resolveProject(input:Input,sessionId?:string):Promise<{service:StudioService;projectId:string;snapshot:StudioSnapshot}>{
+  async resolveProject(input:Input,sessionId?:string):Promise<{service:StudioService;projectId:string;snapshot:StudioSnapshot;routing:ProjectRouting;requiresRevision:boolean}>{
     await this.initialized;
-    const id=typeof input.projectId==='string'?input.projectId:sessionId?this.index.sessions[sessionId]:this.index.selected;
-    if(!id)throw new Error('当前会话还没有视频工程，请先使用 video_project 创建或绑定工程');
-    const service=await this.service(id),snapshot=await service.snapshot();
+    const bound=sessionId?await this.sessionRouting(sessionId,input.signal instanceof AbortSignal?input.signal:undefined):undefined;
+    const explicit=typeof input.projectId==='string'?input.projectId:undefined;
+    const id=explicit??(sessionId?bound?.projectId:this.index.selected);
+    if(!id)throw Object.assign(new Error('当前会话还没有视频工程，请先使用 video_project 创建或绑定工程'),{code:'PROJECT_UNBOUND'});
+    const service=await this.service(id),snapshot=await this.decorate(service,bound?.routing.ownerSessionId);
     if(!snapshot.project)throw new Error('视频工程尚未打开');
-    return {service,projectId:snapshot.project.id,snapshot};
+    const routing:ProjectRouting={callerSessionId:sessionId,ownerSessionId:explicit&&bound?.projectId!==id?sessionId:bound?.routing.ownerSessionId,routingSource:explicit?'explicit-project':bound?.routing.routingSource??'selected-project'};
+    return {service,projectId:snapshot.project.id,snapshot:{...snapshot,routing},routing,requiresRevision:bound?.requiresRevision??false};
   }
-  async call<T=HubSnapshot>(endpoint:string,input:unknown={}):Promise<T>{return resultValue<T>(await this.route(endpoint,input));}
-  async route(endpoint:string,payload:unknown):Promise<RpcResult>{
-    if(['create','open','duplicate','archive','restore','bind','bindSession'].includes(endpoint)){
-      const result=this.openings.then(()=>this.performRoute(endpoint,payload));this.openings=result.then(()=>undefined,()=>undefined);return result;
+  async call<T=HubSnapshot>(endpoint:string,input:unknown={},context:CallContext={}):Promise<T>{return resultValue<T>(await this.route(endpoint,input,context));}
+  async route(endpoint:string,payload:unknown,context:CallContext={}):Promise<RpcResult>{
+    if(['create','open','duplicate','archive','restore','bind','bindSession','unbindSession','focus'].includes(endpoint)){
+      const result=this.openings.then(()=>this.performRoute(endpoint,payload,context));this.openings=result.then(()=>undefined,()=>undefined);return result;
     }
-    return this.performRoute(endpoint,payload);
+    return this.performRoute(endpoint,payload,context);
   }
-  private async performRoute(endpoint:string,payload:unknown):Promise<RpcResult>{
+  private async performRoute(endpoint:string,payload:unknown,context:CallContext={}):Promise<RpcResult>{
     try{
       await this.initialized;if(this.disposed)throw new Error('插件服务已停止');const data=record(payload),sessionId=typeof data.sessionId==='string'?data.sessionId:undefined;
       const projectInput=record(data.project);
-      let id=typeof data.projectId==='string'?data.projectId:typeof projectInput.id==='string'?projectInput.id:sessionId?this.index.sessions[sessionId]:this.index.selected;
-      if(endpoint==='list')return {ok:true,value:{projects:structuredClone(this.index.projects.filter(item=>data.includeArchived===true||!item.archived)),sessions:{...this.index.sessions},selected:this.index.selected}};
+      if(endpoint==='list')return {ok:true,value:{projects:structuredClone(this.index.projects.filter(item=>data.includeArchived===true||!item.archived)),bindings:structuredClone(this.index.bindings),sessions:this.sessions(),selected:this.index.selected}};
+      const explicitId=typeof data.projectId==='string'?data.projectId:typeof projectInput.id==='string'?projectInput.id:undefined;
+      const routed=sessionId&&!explicitId?this.bindingOwner(sessionId,await this.directory(sessionId)):undefined;
+      const id=explicitId??(sessionId?routed?.projectId:this.index.selected);
       if(endpoint==='archive'||endpoint==='restore'){
         const location=this.index.projects.find(item=>item.id===id);if(!location)throw new Error('未找到视频工程');
         const archived=endpoint==='archive'&&data.archived!==false;
         if(archived&&(await this.services.get(location.id)?.snapshot())?.task?.status==='running')throw new Error('工程仍有制作任务，请等待或取消后归档');
-        location.archived=archived;location.archivedAt=archived?new Date().toISOString():undefined;
-        if(archived&&this.index.selected===id){this.index.selected=this.index.projects.find(item=>!item.archived)?.id;this.selectedSession=undefined;this.focus=undefined;}
-        else if(!archived&&data.select!==false){this.index.selected=location.id;this.selectedSession=undefined;this.focus=undefined;}
-        await this.saveIndex();return {ok:true,value:await this.decorate(await this.service())};
+        await this.updateIndex(index=>{const entry=index.projects.find(item=>item.id===location.id)!;entry.archived=archived;entry.archivedAt=archived?new Date().toISOString():undefined;
+          if(archived&&index.selected===id)index.selected=index.projects.find(item=>!item.archived)?.id;
+          else if(!archived&&data.select!==false)index.selected=location.id;
+        });this.selectedSession=undefined;this.focus=undefined;
+        return {ok:true,value:await this.decorate(await this.service())};
       }
       if(endpoint==='duplicate'){
         const original=await this.service(id),copied=resultValue<{root:string;project:VideoProject}>(await original.rpc('duplicate',data)),service=this.makeService();
-        try{const snapshot=resultValue<StudioSnapshot>(await service.rpc('open',{path:copied.root}));this.services.set(snapshot.project!.id,service);if(data.select!==false){this.index.selected=snapshot.project!.id;this.selectedSession=undefined;this.focus=undefined;}await this.remember(snapshot);return {ok:true,value:await this.decorate(service)};}catch(error){await service.dispose();throw error;}
+        try{const snapshot=resultValue<StudioSnapshot>(await service.rpc('open',{path:copied.root}));this.services.set(snapshot.project!.id,service);await this.remember(snapshot);if(data.select!==false)await this.selectProject(snapshot.project!.id);return {ok:true,value:await this.decorate(service)};}catch(error){await service.dispose();throw error;}
       }
       if(endpoint==='create'||endpoint==='open'){
         if(endpoint==='create'&&typeof projectInput.id==='string'&&this.index.projects.some(item=>item.id===projectInput.id))throw new Error('工程 ID 已存在，请复制工程或生成新 ID');
         if(endpoint==='open'&&typeof data.path==='string'){
           const requestedPath=resolve(data.path),existing=this.index.projects.find(item=>resolve(item.path)===requestedPath);
-          if(existing){if(existing.archived){existing.archived=false;existing.archivedAt=undefined;await this.saveIndex();}const service=await this.service(existing.id);if(sessionId)await this.bind(service,sessionId);if(data.select!==false){this.index.selected=existing.id;this.selectedSession=sessionId;this.focus=undefined;await this.saveIndex();}return {ok:true,value:await this.decorate(service,sessionId)};}
+          if(existing){if(existing.archived)await this.updateIndex(index=>{const entry=index.projects.find(item=>item.id===existing.id)!;entry.archived=false;entry.archivedAt=undefined;});const service=await this.service(existing.id);if(sessionId)await this.bind(service,sessionId,data,context);else if(data.select!==false)await this.selectProject(existing.id);return {ok:true,value:await this.decorate(service,sessionId)};}
         }
         const service=this.makeService();
         try{
           const snapshot=resultValue<StudioSnapshot>(await service.rpc(endpoint,data));
           if(!snapshot.project)throw new Error('创建或打开工程失败');
           const previous=this.services.get(snapshot.project.id);if(previous)throw new Error('该工程已打开，请使用 projectId 选择工程');
-          this.services.set(snapshot.project.id,service);if(data.select!==false){this.index.selected=snapshot.project.id;this.selectedSession=sessionId;this.focus=undefined;}
-          if(sessionId)await this.bind(service,sessionId);await this.remember(await service.snapshot());
+          this.services.set(snapshot.project.id,service);await this.remember(await service.snapshot());
+          if(sessionId)await this.bind(service,sessionId,data,context);else if(data.select!==false)await this.selectProject(snapshot.project.id);
           return {ok:true,value:await this.decorate(service,sessionId)};
-        }catch(error){await service.dispose();throw error;}
+        }catch(error){const failed=await service.snapshot();if(failed.project)this.services.delete(failed.project.id);await service.dispose();throw error;}
       }
       if(endpoint==='current'&&sessionId&&!id){
-        const empty=await this.bootstrap.snapshot();return {ok:true,value:{...empty,project:null,root:null,previewUrl:null,previewRevision:null,assetBaseUrl:null,task:null,sessionId,focus:undefined,projects:this.index.projects.filter(item=>!item.archived)}};
+        const empty=await this.bootstrap.snapshot();return {ok:true,value:{...empty,project:null,root:null,previewUrl:null,previewRevision:null,assetBaseUrl:null,task:null,sessionId,focus:undefined,bindings:structuredClone(this.index.bindings),relatedSessionIds:[],currentSessionIds:[],projects:this.index.projects.filter(item=>!item.archived)}};
+      }
+      if(endpoint==='unbindSession'){
+        if(!sessionId||!id)throw new Error('请选择工程和关联会话');await this.unbind(id,sessionId,data,context);
+        return {ok:true,value:await this.decorate(await this.service(),this.selectedSession)};
       }
       const service=await this.service(id);
       if(endpoint==='bind'||endpoint==='bindSession'){
-        if(!sessionId)throw new Error('请选择关联会话');await this.bind(service,sessionId);if(data.select!==false){const snapshot=await service.snapshot();this.index.selected=snapshot.project!.id;this.selectedSession=sessionId;await this.saveIndex();}
+        if(!sessionId)throw new Error('请选择关联会话');await this.bind(service,sessionId,{select:false,...data},context);
         return {ok:true,value:await this.decorate(service,sessionId)};
       }
       if(endpoint==='focus'){
         const snapshot=await service.snapshot();if(!snapshot.project)throw new Error('请先创建视频工程');
-        this.index.selected=snapshot.project.id;this.selectedSession=Object.keys(this.index.sessions).find(id=>this.index.sessions[id]===snapshot.project!.id&&(!sessionId||id===sessionId));
+        await this.selectProject(snapshot.project.id,sessionId&&this.index.bindings[sessionId]?.relatedProjectIds.includes(snapshot.project.id)?sessionId:undefined);
         this.focus={...(typeof data.shotId==='string'?{shotId:data.shotId}:{}),...(typeof data.frame==='number'?{frame:Math.max(0,Math.floor(data.frame))}:{})};
-        await this.saveIndex();return {ok:true,value:await this.decorate(service,sessionId)};
+        return {ok:true,value:await this.decorate(service,sessionId)};
       }
       const result=await service.rpc(endpoint,data);if(!result.ok)return result;
       if(['source','inspect','history','tasks','jobs'].includes(endpoint))return result;

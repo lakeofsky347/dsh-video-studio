@@ -1,4 +1,4 @@
-import type { ClientRpc, ModelRoute, ProjectHistory, ProjectLocation, SceneSource, StudioApi, StudioSnapshot, VideoProject } from '../shared/types.ts';
+import type { ClientRpc, ModelRoute, ProjectHistory, ProjectLocation, SceneSource, SessionBindings, StudioApi, StudioSnapshot, VideoProject } from '../shared/types.ts';
 import { SourceDraftStore, type SourceDraft } from './source-drafts.ts';
 
 export interface StudioState {
@@ -8,6 +8,7 @@ export interface StudioState {
   localImages:Record<string,string>; focusFrame:number|null; focusSerial:number;
   sourceDraft:boolean; sourceDraftCount:number; draftSerial:number;
   workspaceView:'projects'|'studio'; projects:ProjectLocation[]; libraryLoading:boolean;
+  sessionBindings:SessionBindings; relationPending:boolean;
 }
 export class StudioRequestError extends Error {constructor(message:string,readonly code:string){super(message);this.name='StudioRequestError';}}
 export class RpcStudioApi implements StudioApi {
@@ -21,12 +22,13 @@ export class RpcStudioApi implements StudioApi {
 
 /** The plugin owns drafts and polling across DSH page navigation. */
 export class StudioController {
-  private state:StudioState={snapshot:null,loading:true,pending:false,saving:false,dirty:false,conflict:false,error:'',notice:'',scheme:'dark',selected:null,route:{provider:'',model:''},canUndo:false,canRedo:false,history:null,localImages:{},focusFrame:null,focusSerial:0,sourceDraft:false,sourceDraftCount:0,draftSerial:0,workspaceView:'studio',projects:[],libraryLoading:false};
+  private state:StudioState={snapshot:null,loading:true,pending:false,saving:false,dirty:false,conflict:false,error:'',notice:'',scheme:'dark',selected:null,route:{provider:'',model:''},canUndo:false,canRedo:false,history:null,localImages:{},focusFrame:null,focusSerial:0,sourceDraft:false,sourceDraftCount:0,draftSerial:0,workspaceView:'projects',projects:[],libraryLoading:false,sessionBindings:{},relationPending:false};
   private listeners=new Set<()=>void>(); private disposed=false;
   private saveTimer:ReturnType<typeof setTimeout>|undefined; private pollTimer:ReturnType<typeof setTimeout>|undefined;
   private editSerial=0; private dirty=false; private savingPromise:Promise<void>|null=null; private saveFailed=false;
   private polling=false; private actionEpoch=0; private snapshotReadSerial=0; private serverRevision:number|null=null; private serverProjectId:string|null=null;
   private drafts:SourceDraftStore;
+  private libraryReadSerial=0;
   constructor(readonly api:StudioApi,drafts?:SourceDraftStore){this.drafts=drafts||new SourceDraftStore();}
   getSnapshot=():StudioState=>this.state;
   subscribe=(fn:()=>void):(()=>void)=>{this.listeners.add(fn);return()=>{this.listeners.delete(fn);};};
@@ -45,6 +47,7 @@ export class StudioController {
     const provider=snapshot.providers.find(p=>p.id===this.state.route.provider)||snapshot.providers.find(p=>p.models.length);
     const model=provider?.models.find(m=>m.id===this.state.route.model)||provider?.models[0],selected=this.state.selected;
     this.update({snapshot:{...snapshot,project},loading:false,dirty:this.dirty,...this.draftState(project?.id),
+      ...(snapshot.bindings?{sessionBindings:snapshot.bindings}:{}),
       ...(changed?{selected:null,canUndo:false,canRedo:false,history:null,focusFrame:null,localImages:{},conflict:false}:{}),
       ...(conflict?{conflict:true,error:'工程已更新。本地修改仍保留，请保存本地副本后重新读取工程。'}:{}),
       ...(!selected||project?.shots.some(s=>s.id===selected)||project?.assets.some(a=>a.id===selected)?{}:{selected:null}),
@@ -70,7 +73,16 @@ export class StudioController {
     }catch(error){if(current())this.update({error:message(error)});}
   }
   async refreshHistory():Promise<void>{const projectId=this.state.snapshot?.project?.id,revision=this.serverRevision,epoch=this.actionEpoch;if(!projectId)return;try{const history=await this.api.call<ProjectHistory>('history',{projectId});if(!this.disposed&&this.state.snapshot?.project?.id===projectId&&this.serverRevision===revision&&this.actionEpoch===epoch&&Array.isArray(history.entries))this.update({history,canUndo:history.canUndo,canRedo:history.canRedo});}catch{/* Reading history does not change an editor draft. */}}
-  async refreshProjects():Promise<void>{this.update({libraryLoading:true});try{const result=await this.api.call<{projects:ProjectLocation[]}>('list',{includeArchived:true});if(Array.isArray(result.projects))this.update({projects:result.projects});}catch(e){this.update({error:message(e)});}finally{this.update({libraryLoading:false});}}
+  async refreshProjects():Promise<void>{
+    const read=++this.libraryReadSerial;this.update({libraryLoading:true});
+    try{
+      const result=await this.api.call<{projects:ProjectLocation[];bindings?:SessionBindings;sessions?:Record<string,string>}>('list',{includeArchived:true});
+      if(read!==this.libraryReadSerial)return;
+      const bindings=result.bindings??Object.fromEntries(Object.entries(result.sessions??{}).map(([id,projectId])=>[id,{currentProjectId:projectId,relatedProjectIds:[projectId],updatedAt:''}]));
+      if(Array.isArray(result.projects))this.update({projects:result.projects,sessionBindings:bindings});
+    }catch(e){if(read===this.libraryReadSerial)this.update({error:message(e)});}
+    finally{if(read===this.libraryReadSerial)this.update({libraryLoading:false});}
+  }
   async showProjects():Promise<boolean>{await this.flush();if(this.dirty){this.update({error:this.state.error||'工程修改尚未保存，请先处理保存错误。'});return false;}this.update({workspaceView:'projects'});await this.refreshProjects();return true;}
   showStudio=():void=>this.update({workspaceView:'studio'});
   async focusProject(project:string|{projectId?:string;path?:string;sessionId?:string;shotId?:string;frame?:number},focus:{shotId?:string;frame?:number;sessionId?:string}={}):Promise<void>{
@@ -81,7 +93,25 @@ export class StudioController {
     const frame=payload.frame??this.state.snapshot?.focus?.frame;if(frame!==undefined)this.update({focusFrame:frame,focusSerial:this.state.focusSerial+1});
     this.showStudio();
   }
-  async bindSession(sessionId:string):Promise<void>{await this.action('bindSession',{sessionId},'工程已关联到会话');}
+  /** Relation edits never replace the visible film or flush unrelated source/parameter drafts. */
+  async bindSession(sessionId:string,projectId=this.state.snapshot?.project?.id,expectedCurrentProjectId?:string):Promise<void>{
+    if(!projectId)throw new Error('请选择影片工程');
+    await this.changeRelation('bindSession',{sessionId,projectId,select:false,expectedCurrentProjectId:expectedCurrentProjectId??this.state.sessionBindings[sessionId]?.currentProjectId??null},'工程已关联，并设为此会话的当前工程。');
+  }
+  async unbindSession(sessionId:string,projectId=this.state.snapshot?.project?.id):Promise<void>{
+    if(!projectId)throw new Error('请选择影片工程');
+    await this.changeRelation('unbindSession',{sessionId,projectId,expectedCurrentProjectId:this.state.sessionBindings[sessionId]?.currentProjectId??null},'已解除关联，影片和会话内容保留。');
+  }
+  private async changeRelation(endpoint:string,payload:unknown,notice:string):Promise<void>{
+    if(this.state.relationPending)throw new Error('正在更新会话关联，请稍后再试');
+    this.libraryReadSerial++;this.actionEpoch++;this.update({relationPending:true,error:this.state.conflict?this.state.error:'',notice:''});
+    try{
+      const result=await this.api.call<{bindings?:SessionBindings}>(endpoint,payload);
+      if(result.bindings)this.update({sessionBindings:result.bindings});
+      await this.refreshProjects();this.update({notice});
+    }catch(error){this.update({error:message(error)});throw error;}
+    finally{this.actionEpoch++;this.update({relationPending:false});}
+  }
   async audio(payload:unknown):Promise<void>{await this.action('audio',payload);}
   private schedulePoll():void{if(this.disposed||this.polling||this.pollTimer)return;this.pollTimer=setTimeout(()=>{this.pollTimer=undefined;void this.poll();},700);}
   private async poll():Promise<void>{

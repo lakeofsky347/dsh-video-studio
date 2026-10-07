@@ -30,7 +30,7 @@ test('existing sessions own separate projects; restart restores bindings and foc
     await hub.dispose();hub=new ProjectHub(context,{baseDirectory:base});tools=createSessionTools(context,hub);
     assert.equal((await run(tools,'video_project',{action:'get'},'session-A')).projectId,a.projectId);
     assert.equal((await run(tools,'video_project',{action:'get'},'session-B')).projectId,b.projectId);
-    const index=JSON.parse(await readFile(join(base,'sessions.json'),'utf8'));assert.equal(index.sessions['session-A'],a.projectId);
+    const index=JSON.parse(await readFile(join(base,'sessions.json'),'utf8'));assert.equal(index.bindings['session-A'].currentProjectId,a.projectId);
   }finally{await hub.dispose();await rm(base,{recursive:true,force:true});}
 });
 

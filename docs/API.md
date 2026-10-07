@@ -127,7 +127,7 @@ export function render(ctx) {
 | `video_render` | preview/check/export；foreground 默认 false | 后台返回 DSH jobId；前台等待并返回工程与输出 |
 | `video_audio` | import/add/update/remove/synthesize；request 含 assetId、shotId、角色、裁剪等 | 导入/片段更新结果，合成返回后台 jobId |
 
-`exec.agent.id` 是工具所属会话。Session 索引位于工程基目录 `sessions.json`，工程文件保存关联 session ID。省略 projectId 时仅查当前会话当前工程。后台任务 owner 也是该会话，进度、日志、完成通知及取消复用 DSH Jobs。模型提交现有对话中的要求和源码，不通过插件重复调用另一个聊天模型。
+`exec.agent.id` 是实际工具调用者 Session。Session 索引位于工程基目录 `sessions.json`，v2 bindings 保存 currentProjectId、relatedProjectIds、updatedAt；不写入影片内容版本。省略 projectId 时查当前会话显式绑定，subagent/team 成员沿真实委派链查最近祖先；普通 fork 不继承，显式空绑定停止继承。后台任务 owner 始终是实际调用者，进度、日志、完成通知及取消复用 DSH Jobs。模型提交现有对话中的要求和源码，不通过插件重复调用另一个聊天模型。
 
 `video_update.sources` 接受 `{shotId,source:{html,css,js}}[]`，先验证整批镜头引用和源码结构，再写入文件。模型应先读取最新 revision 并保留稳定镜头 ID，只提交用户要求修改的范围。
 
@@ -176,3 +176,20 @@ TTS 是独立能力，不把 ctx.llm 当作音频接口。本地适配为 macOS 
 同一工程的写请求和后台提交排队。工程及全部镜头源码以完整版本保存；状态指针切换是提交点，投影中断可在重开时修复。旧工程首次打开迁移到该协议，schemaVersion 仍为 1。导出以指定 revision 读取源码，历史镜头删除或移动源码路径后仍可复核旧输入。
 
 任务执行前保存记录，结束保存状态；重启将未完成记录标为 `interrupted`。只允许插件自己记录的预览、导出和生成请求由用户重试，配音不自动重放。没有逐帧断点续渲或跨进程工程锁。
+
+## 0.4.0 会话关联与代理协作
+
+| RPC | 输入 | 语义 |
+| --- | --- | --- |
+| `list` | `includeArchived?:boolean` | 返回工程摘要、`bindings`、兼容的当前工程 `sessions` 映射及 `selected` |
+| `bindSession` | `projectId,sessionId,expectedCurrentProjectId?:string|null` | 建立关系并设为当前；保留其他关联影片；不改变当前浏览工程 |
+| `unbindSession` | `projectId,sessionId,expectedCurrentProjectId?:string|null` | 解除指定关系；若是当前则清空当前；不自动选替代工程 |
+| `focus` | `projectId,sessionId?,shotId?,frame?` | 浏览定位，保持与关联写入分开 |
+
+`expectedCurrentProjectId:null` 表示提交时应无当前工程。服务在原子索引提交中检查，关系已改变返回 `BINDING_CONFLICT`。绑定提交校验实际宿主目录；正在运行的调用者或继承其工程的后代阻止界面换绑。工具可在自己回合内创建或明确绑定工程。
+
+`video_project create` 对已继承影片的子代理返回同一工程，设置 `forceNew:true` 可创建专属工程。`video_update` 和 `video_audio` 对子代理/team 调用要求 `expectedRevision`，省略时返回 `REVISION_REQUIRED`；过期 revision 返回冲突并要求重新读取。
+
+工具回执增加 `callerSessionId`（实际调用者）、`ownerSessionId`（当前工程归属会话）与 `routingSource`（`explicit-project`、`session-binding`、`subagent-ancestor` 或 `selected-project`）。显式 projectId 固定操作工程，任务启动后使用已解析工程与 revision，不随默认关联变化转向。`sessionId` 为兼容导航字段，客户端优先使用 callerSessionId 返回实际调用会话；子代理导航使用宿主 durable parent/child/mode 地址。
+
+旧 v1 sessions 字典迁移为 v2 当前及关联工程。项目 JSON 的 sessionIds 不再用于重启自动绑定；复制或导入影片不会自动激活来源会话。详细使用规则见 [SESSION-WORKFLOW.md](SESSION-WORKFLOW.md)。

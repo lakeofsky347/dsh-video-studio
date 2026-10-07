@@ -16,7 +16,9 @@ const link=resolve(profile,'node_modules/dsh-video-studio');mkdirSync(dirname(li
 if(existsSync(link)&&lstatSync(link).isSymbolicLink()&&resolve(dirname(link),readlinkSync(link))!==pluginRoot)unlinkSync(link);
 if(!existsSync(link))symlinkSync(pluginRoot,link,'dir');
 const patch=resolve(home,'offline.patch.yml'),sessionFixture=process.env.DSH_SESSION_FIXTURE==='1';
-writeFileSync(patch,sessionFixture?`- id: agent-default-model\n  config:\n    provider: video-studio-session-offline\n    model: offline-session-video\n- id: llm-pi-ai\n  disabled: true\n- id: llm-deepseek\n  disabled: true\n- id: llm-deepseek-account\n  disabled: true\n- insert:\n    - id: video-studio-session-offline\n      name: ${JSON.stringify(resolve(root,'tests/fixtures/session-provider.mjs'))}\n`:`- insert:\n    - id: video-studio-offline\n      name: ${JSON.stringify(resolve(root,'tests/fixtures/preview-provider.mjs'))}\n`);
+const sessionProvider=resolve(process.env.DSH_SESSION_PROVIDER_FIXTURE??resolve(root,'tests/fixtures/session-provider.mjs'));
+writeFileSync(patch,sessionFixture?`- id: agent-default-model\n  config:\n    provider: video-studio-session-offline\n    model: offline-session-video\n- id: llm-pi-ai\n  disabled: true\n- id: llm-deepseek\n  disabled: true\n- id: llm-deepseek-account\n  disabled: true\n- insert:\n    - id: video-studio-session-offline\n      name: ${JSON.stringify(sessionProvider)}\n`:`- insert:\n    - id: video-studio-offline\n      name: ${JSON.stringify(resolve(root,'tests/fixtures/preview-provider.mjs'))}\n`);
+if(process.env.DSH_PREVIEW_EXTRA_PATCH)writeFileSync(patch,readFileSync(patch,'utf8')+'\n'+readFileSync(resolve(process.env.DSH_PREVIEW_EXTRA_PATCH),'utf8'));
 const args=['--profile',profileName,'--no-open','--port',process.env.DSH_PREVIEW_PORT??'19405'];
 writeFileSync(resolve(profile,'cordis.patch.yml'),process.env.DSH_OFFLINE==='0'?'[]\n':readFileSync(patch,'utf8'));
 console.log(`Isolated DSH profile: ${profileName}. Offline provider is a test fixture.`);
