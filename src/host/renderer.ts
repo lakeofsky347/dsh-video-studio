@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import { constants, existsSync } from 'node:fs';
+import { constants } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
@@ -11,6 +11,7 @@ import { compileSpec } from '../core/index.js';
 import { ProjectStore, projectPath } from './store.js';
 import { browserRuntime, runtimeHtml } from '../runtime/browser.js';
 import {AudioMixer, type AudioMix} from './audio.js';
+import {inspectToolEnvironment, type ToolEnvironmentOptions} from './tool-environment.js';
 
 export interface FrameCapture { frame:number; shotId:string; path:string; sha256:string }
 export interface RenderIssue { shotId?:string; frame?:number; message:string }
@@ -18,20 +19,8 @@ export interface RenderCheckResult { ok:boolean; errors:RenderIssue[]; frames:Fr
 interface ProjectServer { server:Server; origin:string; root:string }
 const mime:Record<string,string>={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json; charset=utf-8','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.txt':'text/plain; charset=utf-8','.woff2':'font/woff2','.mp4':'video/mp4','.wav':'audio/wav','.mp3':'audio/mpeg','.m4a':'audio/mp4','.aac':'audio/aac','.flac':'audio/flac','.ogg':'audio/ogg'};
 
-export function detectEnvironment(settings:Partial<EnvironmentSettings>={}):EnvironmentInfo {
-  const browserPath=settings.browserPath||firstExisting([
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome','/Applications/Chromium.app/Contents/MacOS/Chromium',
-    process.env.LOCALAPPDATA?path.join(process.env.LOCALAPPDATA,'Google/Chrome/Application/chrome.exe'):'',
-    process.env.PROGRAMFILES?path.join(process.env.PROGRAMFILES,'Google/Chrome/Application/chrome.exe'):'',
-    '/usr/bin/google-chrome','/usr/bin/chromium','/usr/bin/chromium-browser'
-  ]);
-  const ffmpegPath=settings.ffmpegPath||findExecutable('ffmpeg');
-  const ffprobePath=settings.ffprobePath||findExecutable('ffprobe');
-  return {browserPath,ffmpegPath,ffprobePath,browserAvailable:!!browserPath&&existsSync(browserPath),ffmpegAvailable:!!ffmpegPath&&existsSync(ffmpegPath),ffprobeAvailable:!!ffprobePath&&existsSync(ffprobePath)};
-}
-function firstExisting(candidates:string[]):string { return candidates.find(candidate=>candidate&&existsSync(candidate))??''; }
-function findExecutable(name:string):string {
-  return firstExisting(['/opt/homebrew/bin/'+name,'/usr/local/bin/'+name,...(process.env.PATH??'').split(path.delimiter).filter(Boolean).map(folder=>path.join(folder,process.platform==='win32'?name+'.exe':name))]);
+export function detectEnvironment(settings:Partial<EnvironmentSettings>={},options:ToolEnvironmentOptions={}):EnvironmentInfo {
+  return inspectToolEnvironment(settings,options);
 }
 function hash(buffer:Buffer|string):string { return createHash('sha256').update(buffer).digest('hex'); }
 function json(value:unknown):string { return JSON.stringify(value,null,2)+'\n'; }

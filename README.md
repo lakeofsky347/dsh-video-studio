@@ -367,7 +367,14 @@ command -v ffprobe
 npm ci --legacy-peer-deps --ignore-scripts
 ```
 
-本地测试还需要能解析 `package.json` 中的 DSH peer dependencies。上面的命令会跳过自动安装 peer dependencies，请在 DSH 插件开发环境中安装或链接对应依赖，版本与宿主保持一致。运行插件时这些依赖由 DSH 提供；单独在终端测试时，也需要它们在本项目中可用。
+本地测试还需要能解析 `package.json` 中的 DSH peer dependencies。上面的命令会跳过自动安装 peer dependencies；运行插件时这些依赖由 DSH 提供，单独测试时需要链接到版本匹配的官方宿主。可以复用已安装宿主的 `node_modules`，或在**插件检出之外**创建临时宿主目录，按以下步骤准备；将占位路径替换为自己的绝对路径：
+
+```sh
+npm install --prefix "<临时宿主目录>" --ignore-scripts --save-exact @deepseek-ai/dsh@0.2.0-rc.2
+node scripts/link-host-dependencies.mjs "<临时宿主目录>/node_modules"
+```
+
+链接脚本会先核对所有 peer 包名和版本，再建立目录链接；Windows 使用 junction。它不修改插件依赖声明或锁文件。也可通过 `DSH_HOST_NODE_MODULES` 指定宿主的 `node_modules` 目录。
 
 依赖准备好后，执行检查、构建和打包：
 
@@ -375,19 +382,22 @@ npm ci --legacy-peer-deps --ignore-scripts
 npm run typecheck
 npm test
 npm run build
-mkdir -p artifacts
+node -e "require('node:fs').mkdirSync('artifacts',{recursive:true})"
 npm pack --pack-destination artifacts
 ```
 
-`scripts/prepare-local.mjs` 供维护者复用已有本地依赖。使用前需要通过 `DSH_REFERENCE_PLUGIN` 指向已备妥依赖的参考插件目录，并准备该脚本要求的 `.local/runtime/node_modules`、父仓库中的 Playwright，以及本插件的 `.local/vendor/comfyorg-litegraph-0.17.2.tgz`。首次配置时请先核对脚本中的路径；发行锁文件不包含这些本机路径。
+`scripts/prepare-local.mjs` 供维护者复用已有本地依赖，必须明确设置 `DSH_REFERENCE_PLUGIN`，指向已安装本插件全部开发与运行依赖的参考插件目录；宿主依赖默认来自参考目录的 `.local/runtime/node_modules`，也可用 `DSH_HOST_NODE_MODULES` 指定。脚本先检查来源，缺失时会停止并给出标准 npm 流程指引。新机器优先使用上述 npm 流程，无需个人目录、父仓库 Playwright 或本地 tar 包。
 
-`npm run preview` 使用官方 DSH 运行库和独立 profile，默认端口为 `19405`。默认 CLI 路径为 `/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh`，其他安装位置可通过 `DSH_CLI` 指定。预览脚本中的固定响应模型用于本地测试，不随插件发布；它不能用于判断真实模型的生成质量。
+`npm run preview` 使用官方 DSH 运行库和独立 profile，默认端口为 `19405`。CLI 搜索顺序为显式 `DSH_CLI`、`PATH` 中的 `dsh`，最后是 macOS 的默认 `.app` 路径。显式路径无效时会报错；Windows npm 的 `dsh.cmd` 会转换为已核对官方包的 JS 入口，由 Node 直接执行。其他 `.cmd`/`.bat` 启动器请将 `DSH_CLI` 指向官方 `lib/bin.js`。目录链接在 Windows 使用 junction。预览脚本中的固定响应模型用于本地测试，不随插件发布；它不能用于判断真实模型的生成质量。
+
+`.github/workflows/platform-checks.yml` 定义 Windows、macOS 和 Linux 的类型检查、测试与构建。基础 CI 会记录媒体工具是否可用，媒体测试的跳过不能作为该平台导出通过的证据。Windows CI 先启用 Developer Mode 并实测文件及目录 symlink 权限；权限不足即失败。普通本地测试若缺少该权限会明确跳过真实 symlink 测试，也可设置 `DSH_REQUIRE_SYMLINK_TESTS=1` 要求失败。工作流定义不代表三平台已实际运行或原生界面已验收。
 
 | 文档 | 内容 |
 | --- | --- |
 | [API 与场景接口](docs/API.md) | 工程结构、视频工具、音轨、`ctx` 参数和源码渲染约定 |
 | [会话与代理制作说明](docs/SESSION-WORKFLOW.md) | 多影片关联、子代理继承、团队协作和版本冲突处理 |
 | [0.4 验收说明](docs/ACCEPTANCE-v0.4.md) | 检查范围、复现方式与验收结果的适用范围 |
+| [操作系统适配进度](docs/PLATFORM-SUPPORT.md) | 三系统基础实现、当前验证边界与剩余真机验收 |
 | [配图来源](docs/images/readme/SOURCES.md) | 截图环境、演示素材和各张图片的内容 |
 | [项目来源](docs/ORIGIN.md) | 插件与相关项目的关系 |
 | [第三方声明](THIRD_PARTY_NOTICES.md) | 使用的开源组件和许可来源 |

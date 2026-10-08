@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { ProjectStore, projectPath } from '../src/host/store.js';
 import { VideoRenderer, detectEnvironment } from '../src/host/renderer.js';
 import { createProject, defaultSceneSource } from '../src/core/index.js';
+import {createTestSymlink} from './fixtures/symlink.js';
 
 test('project, image/text references and scene sources persist without an in-memory cache',async()=>{
   const directory=await fs.mkdtemp(path.join(os.tmpdir(),'dsh-studio-store-'));
@@ -27,14 +28,21 @@ test('project, image/text references and scene sources persist without an in-mem
     assert.doesNotMatch((await freshStore.readSource(created.root,shot)).js,/edited outside plugin/);
     await freshStore.open(created.root);assert.equal(await fs.readFile(path.join(created.root,shot.sourcePath,'scene.js'),'utf8'),original.js);
     await assert.rejects(projectPath(created.root,'../outside.txt'),/Invalid/);
-    await fs.symlink(directory,path.join(created.root,'link'));
-    await assert.rejects(projectPath(created.root,'link/recent.json'),/Symlink/);
     await assert.rejects(store.importImageOrText(created.root,{dataBase64:Buffer.from('GIF89a').toString('base64'),mime:'image/gif'}),/Only PNG/);
   }finally{await fs.rm(directory,{recursive:true,force:true});}
 });
 
+test('project paths reject a real directory symlink outside the project',async t=>{
+  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'dsh-studio-link-'));
+  try{
+    const created=await new ProjectStore({baseDirectory:directory}).create({title:'真实链接边界'});
+    if(!await createTestSymlink(t,directory,path.join(created.root,'link'),'dir'))return;
+    await assert.rejects(projectPath(created.root,'link/recent.json'),/Symlink/);
+  }finally{await fs.rm(directory,{recursive:true,force:true});}
+});
+
 const env=detectEnvironment();
-test('real Chrome + FFmpeg export: image/text, horizontal/vertical frames, Range serving, replay and failure attribution',{skip:!env.browserAvailable||!env.ffmpegAvailable||!env.ffprobeAvailable},async()=>{
+test('real Chrome + FFmpeg export: image/text, horizontal/vertical frames, Range serving, replay and failure attribution',{skip:env.browserAvailable&&env.ffmpegAvailable&&env.ffprobeAvailable?false:'Real media test requires executable Chromium, FFmpeg and ffprobe; export behavior was not verified.'},async()=>{
   const parent=process.env.VIDEO_STUDIO_TEST_ARTIFACTS?path.resolve(process.env.VIDEO_STUDIO_TEST_ARTIFACTS):await fs.mkdtemp(path.join(os.tmpdir(),'dsh-studio-render-'));
   await fs.mkdir(parent,{recursive:true});const store=new ProjectStore({baseDirectory:parent}),renderer=new VideoRenderer(store);
   try{

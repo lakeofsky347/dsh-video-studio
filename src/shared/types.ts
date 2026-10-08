@@ -64,7 +64,7 @@ export interface SessionBinding {
 }
 export type SessionBindings=Record<string,SessionBinding>;
 export interface EnvironmentSettings { browserPath:string; ffmpegPath:string; ffprobePath:string }
-export interface EnvironmentInfo extends EnvironmentSettings { browserAvailable:boolean; ffmpegAvailable:boolean; ffprobeAvailable:boolean }
+export interface EnvironmentInfo extends EnvironmentSettings { browserAvailable:boolean; ffmpegAvailable:boolean; ffprobeAvailable:boolean; platform?:string; localSpeechAvailable?:boolean }
 export interface ProviderGroup { id:string; name:string; models:{id:string;name:string;inputModalities?:string[]}[]; error?:string }
 export interface StudioSnapshot {
   project:VideoProject|null; root:string|null; task:TaskState|null;

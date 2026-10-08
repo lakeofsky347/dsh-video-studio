@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-07T14:42:22.279419+00:00",
+  "recordedAtAsiaShanghai": "2026-10-07T22:42:22.279419+08:00",
+  "project": "dsh-video-studio",
+  "version": "0.4.0",
+  "testedHead": "8a3eebe3e9dfa074f3c4e96515c7a0999a3b4f5d",
+  "host": {
+    "platform": "linux",
+    "arch": "x64",
+    "distribution": "Debian GNU/Linux 13.6",
+    "node": "24.19.0",
+    "npm": "11.9.0",
+    "chromium": "151.0.7922.173",
+    "ffmpeg": "7.1.5",
+    "ffprobe": "7.1.5",
+    "displaySession": false
+  },
+  "runtime": {
+    "dsh": "0.2.0-rc.2",
+    "playwrightCore": "1.63.0"
+  },
+  "checks": [
+    {
+      "command": "npm run typecheck",
+      "status": "PASS",
+      "exitCode": 0
+    },
+    {
+      "command": "npm test",
+      "status": "PASS",
+      "exitCode": 0,
+      "counts": {
+        "tests": 121,
+        "pass": 119,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 2,
+        "todo": 0
+      },
+      "requiresLocalSocketPermission": true,
+      "skipReason": "Two local:say tests require macOS"
+    },
+    {
+      "command": "npm run build",
+      "status": "PASS",
+      "exitCode": 0
+    },
+    {
+      "name": "service-readiness",
+      "status": "PASS",
+      "checkedAt": "2026-10-07T14:37:55.634Z",
+      "result": {
+        "homepage": true,
+        "rpc": true,
+        "renderTools": true,
+        "pageErrors": 0
+      }
+    }
+  ],
+  "executionConditions": {
+    "testSocketPermission": "command-scoped with_additional_permissions.network.enabled=true",
+    "dependencies": "preinstalled; no dependency or lockfile changes",
+    "sourcesAndTestsChanged": false,
+    "attempts": [
+      {
+        "mode": "default restricted sandbox",
+        "command": "npm test",
+        "reportedUnit": "test files; per-case output not available",
+        "exitCode": 1,
+        "status": "ENVIRONMENT_FAILURE",
+        "detail": "Local sockets were denied (listen EPERM); DSH test runner also raised a native assertion. Standard command passed with required command-scoped permissions."
+      },
+      {
+        "mode": "default restricted sandbox",
+        "command": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
+        "exitCode": 1,
+        "status": "ENVIRONMENT_FAILURE",
+        "detail": "Serial execution did not resolve the sandbox issue."
+      }
+    ]
+  },
+  "scope": {
+    "windows": "NOT_CHECKED",
+    "macOS": "NOT_RECHECKED; historical platform evidence kept separately",
+    "nativeDesktop": "NOT_CHECKED; no display session",
+    "releaseInstallation": "NOT_CHECKED",
+    "realPaidProviders": "NOT_CHECKED; no paid requests",
+    "humanFullViewingAndListening": "NOT_CHECKED"
+  },
+  "fixtureProvenance": "Ignored historical media image supplied by existing cloud-onboarding-fixture.webp derived from tracked README workbench.png; not a native 30-second project acceptance.",
+  "knownUnresolvedIssue": {
+    "name": "v0.4 home narrow-window overflow",
+    "source": "artifacts/verification/v0.4/home/verification.json",
+    "windowWidth": 780,
+    "overflowPixels": 2,
+    "followingKeyboardFocusAssertions": "NOT_EXECUTED",
+    "recheckedThisRun": false
+  }
+}

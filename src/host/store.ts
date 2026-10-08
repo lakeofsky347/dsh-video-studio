@@ -5,6 +5,8 @@ import { randomUUID } from 'node:crypto';
 import type { Asset, EnvironmentSettings, SceneSource, Shot, VideoProject } from '../shared/types.js';
 import { createProject, defaultSceneSource, validateProject } from '../core/index.js';
 import {probeAudio} from './audio.js';
+import {syncDirectory} from './directory-sync.js';
+import {inspectProjectPaths,portableProjectPathReason,safeRelativeProjectPath} from '../core/project-paths.js';
 
 export interface StoreOptions {
   baseDirectory?:string;
@@ -25,7 +27,9 @@ export interface RecentProject { path:string; title:string; id:string }
 
 /** Resolve a project-local path and reject traversal, absolute paths and existing symlinks. */
 export async function projectPath(root:string,relative:string):Promise<string> {
-  if(typeof relative!=='string'||!relative||relative.includes('\\')||path.isAbsolute(relative)||relative.split('/').some(p=>p==='..'||p==='.'||!p))throw new Error('Invalid project-relative path');
+  if(!safeRelativeProjectPath(relative))throw new Error('Invalid project-relative path');
+  const reason=process.platform==='win32'?portableProjectPathReason(relative):undefined;
+  if(reason)throw Object.assign(new Error(`路径 ${JSON.stringify(relative)} 不能在 Windows 访问：${reason}`),{code:'PROJECT_PATH_NOT_PORTABLE'});
   const absoluteRoot=path.resolve(root), result=path.resolve(absoluteRoot,relative);
   if(!result.startsWith(absoluteRoot+path.sep))throw new Error('Path outside project');
   let cursor=absoluteRoot;
@@ -45,7 +49,7 @@ async function atomicWrite(file:string,data:string|Buffer):Promise<void> {
   try {
     const handle=await fs.open(temporary,'w');try{await handle.writeFile(data);await handle.sync();}finally{await handle.close();}
     await fs.rename(temporary,file);
-    const directory=await fs.open(path.dirname(file),'r');try{await directory.sync();}catch(error){if(!['EINVAL','ENOTSUP','EISDIR','EPERM'].includes((error as NodeJS.ErrnoException).code??''))throw error;}finally{await directory.close();}
+    await syncDirectory(path.dirname(file));
   }
   finally { await fs.rm(temporary,{force:true}); }
 }
@@ -57,9 +61,10 @@ function assertSource(source:SceneSource):void {
   if(!source||!['html','css','js'].every(key=>typeof source[key as keyof SceneSource]==='string'))throw new Error('Scene source requires html, css and js strings');
   if(Buffer.byteLength(source.html)+Buffer.byteLength(source.css)+Buffer.byteLength(source.js)>2_000_000)throw new Error('Scene source exceeds 2 MB');
 }
-export function validateStoredProject(project:VideoProject):void {
+export function validateStoredProject(project:VideoProject,options:{portablePaths?:boolean}={}):void {
   assertProjectShape(project);
   const check=validateProject(project);if(!check.ok)throw new Error(check.errors.join('\n'));
+  if(options.portablePaths!==false)assertPortablePaths(project);
   const ids=[project.id,...project.shots.map(s=>s.id),...project.assets.map(a=>a.id)];
   if(ids.some(id=>!/^[a-zA-Z0-9_-]{1,100}$/.test(id)||['__proto__','constructor','prototype'].includes(id)))throw new Error('工程、镜头和资产 ID 无效');
   const folders=new Set<string>();
@@ -70,7 +75,11 @@ export function validateStoredProject(project:VideoProject):void {
   for(const asset of project.assets)if(asset.path&&!safeStoragePath(asset.path,'assets/'))throw new Error('媒体资产须保存在 assets/ 子目录');
 }
 function safeStoragePath(value:string,prefix:string):boolean {
-  return typeof value==='string'&&value.startsWith(prefix)&&value.length>prefix.length&&!value.includes('\\')&&!path.isAbsolute(value)&&!value.split('/').some(p=>!p||p==='.'||p==='..');
+  return safeRelativeProjectPath(value)&&value.startsWith(prefix)&&value.length>prefix.length;
+}
+function assertPortablePaths(project:VideoProject,projection=false):void {
+  const issues=inspectProjectPaths(project).filter(issue=>!projection||issue.code==='conflict'||process.platform==='win32');
+  if(issues.length)throw Object.assign(new Error(issues.map(issue=>issue.message).join('\n')),{code:issues.some(issue=>issue.code==='conflict')?'PROJECT_PATH_CONFLICT':'PROJECT_PATH_NOT_PORTABLE'});
 }
 export function validateSources(project:VideoProject,inputs:SourceInput[]=[]):Record<string,SceneSource> {
   if(!Array.isArray(inputs))throw new Error('sources 须为数组');
@@ -141,24 +150,31 @@ export class ProjectStore {
     const key=path.resolve(root)+'/'+id,cached=this.versionCache.get(key);if(cached){this.versionCache.delete(key);this.versionCache.set(key,cached);return cached.record;}
     const text=await fs.readFile(await projectPath(root,`.studio/versions/${id}.json`),'utf8'),record=JSON.parse(text) as StoredVersion;
     if(record.version!==1||record.id!==id||!record.sources||typeof record.label!=='string')throw new Error('工程版本快照损坏');
-    validateStoredProject(record.project);
+    validateStoredProject(record.project,{portablePaths:false});
     for(const shot of record.project.shots)assertSource(record.sources[shot.id]);
     const bytes=Buffer.byteLength(text);if(bytes<=32*1024*1024){while(this.cachedBytes+bytes>32*1024*1024&&this.versionCache.size){const oldest=this.versionCache.keys().next().value!;this.cachedBytes-=this.versionCache.get(oldest)!.bytes;this.versionCache.delete(oldest);}this.versionCache.set(key,{record,bytes});this.cachedBytes+=bytes;}
     return record;
   }
   private async physicalProject(root:string):Promise<VideoProject>{
     const project=JSON.parse(await fs.readFile(await projectPath(root,'project.json'),'utf8')) as VideoProject;
-    validateStoredProject(project);return project;
+    validateStoredProject(project,{portablePaths:false});return project;
   }
   private async physicalSource(root:string,shot:Shot|string):Promise<SceneSource>{
     const folder=scenePath(shot);
     const result:SceneSource={html:await fs.readFile(await projectPath(root,folder+'/index.html'),'utf8'),css:await fs.readFile(await projectPath(root,folder+'/style.css'),'utf8'),js:await fs.readFile(await projectPath(root,folder+'/scene.js'),'utf8')};
     assertSource(result);return result;
   }
+  private async assertPhysicalProjectPaths(root:string):Promise<void>{
+    const state=await this.state(root);let project:VideoProject;
+    if(state)project=(await this.version(root,state.current)).project;
+    else try{project=await this.physicalProject(root);}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return;throw error;}
+    assertPortablePaths(project,true);
+  }
   private async ensureState(root:string):Promise<StoreState|undefined>{
     const state=await this.state(root);if(state)return state;
     let project:VideoProject;
     try{project=await this.physicalProject(root);}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return;throw error;}
+    assertPortablePaths(project,true);
     const sources:Record<string,SceneSource>={};
     for(const shot of project.shots){try{sources[shot.id]=await this.physicalSource(root,shot);}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;sources[shot.id]=defaultSceneSource();}}
     const baseline:StoredVersion={version:1,id:randomUUID(),label:'导入既有工程',createdAt:new Date().toISOString(),project,sources};
@@ -203,6 +219,7 @@ export class ProjectStore {
   }
   async save(root:string,project:VideoProject):Promise<VideoProject>{return this.commit(root,project);}
   private async projectVersion(root:string,record:StoredVersion,previous?:StoredVersion):Promise<void>{
+    assertPortablePaths(record.project,true);
     let previousProjected=false;
     if(previous)try{previousProjected=JSON.parse(await fs.readFile(await projectPath(root,'.studio/projected.json'),'utf8')).current===previous.id;}catch{/* A missing/damaged projection marker means repair every scene file. */}
     for(const shot of record.project.shots){
@@ -239,6 +256,7 @@ export class ProjectStore {
     if(current.project.sessionIds!==undefined)project.sessionIds=structuredClone(current.project.sessionIds);else delete project.sessionIds;
     if(Object.hasOwn(current.project.extensions,'sessionIds'))project.extensions.sessionIds=structuredClone(current.project.extensions.sessionIds);else delete project.extensions.sessionIds;
     project.revision=current.project.revision+1;project.updatedAt=new Date().toISOString();
+    validateStoredProject(project);
     const restored:StoredVersion={...target,id:randomUUID(),label:direction==='undo'?'撤销：'+current.label:'重做：'+target.label,createdAt:project.updatedAt,project};
     const stage=await projectPath(root,`.studio/staging/${restored.id}.json`);await atomicWrite(stage,json(restored));
     try{
@@ -331,7 +349,7 @@ export class ProjectStore {
   }
   private async indexRevision(root:string,record:StoredVersion):Promise<void>{
     await atomicWrite(await projectPath(root,`.studio/revisions/${record.project.revision}.json`),json({version:1,id:record.id,revision:record.project.revision}));
-    const directory=await fs.open(await projectPath(root,'.studio/versions'),'r');try{await directory.sync();}catch(error){if(!['EINVAL','ENOTSUP','EISDIR','EPERM'].includes((error as NodeJS.ErrnoException).code??''))throw error;}finally{await directory.close();}
+    await syncDirectory(await projectPath(root,'.studio/versions'));
   }
   private async snapshotVersion(root:string,state:StoreState,revision?:number):Promise<StoredVersion>{
     const current=await this.version(root,state.current);if(revision===undefined||revision===current.project.revision)return current;
@@ -347,12 +365,14 @@ export class ProjectStore {
   async readSource(root:string,shot:Shot|string,revision?:number):Promise<SceneSource> {
     const state=await this.state(root);
     if(state){const current=await this.snapshotVersion(root,state,revision);const found=typeof shot==='string'?current.project.shots.find(s=>s.sourcePath===shot):current.project.shots.find(s=>s.id===shot.id);if(!found)throw Object.assign(new Error('镜头源码不存在'),{code:'ENOENT'});return structuredClone(current.sources[found.id]!);}
+    await this.assertPhysicalProjectPaths(root);
     return this.physicalSource(root,shot);
   }
   /** Used for detached render snapshots. Live engineering writes use commit(). */
   async writeSource(root:string,shot:Shot|string,source:SceneSource):Promise<void> {
     assertSource(source);const state=await this.state(root);
     if(state)throw new Error('已打开工程的源码须与工程通过 commit 一起提交');
+    await this.assertPhysicalProjectPaths(root);
     const folder=scenePath(shot);
     try { const previous=await this.physicalSource(root,shot);await atomicWrite(await projectPath(root,folder+'/previous.json'),json(previous)); }
     catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
@@ -365,9 +385,11 @@ export class ProjectStore {
     await atomicWrite(await projectPath(root,folder+'/scene.js'),source.js);
   }
   async markSourceGood(root:string,shot:Shot|string):Promise<void> {
+    await this.assertPhysicalProjectPaths(root);
     const source=await this.readSource(root,shot);await atomicWrite(await projectPath(root,scenePath(shot)+'/last-good.json'),json(source));
   }
   async restorationSource(root:string,shot:Shot|string):Promise<SceneSource> {
+    await this.assertPhysicalProjectPaths(root);
     const folder=scenePath(shot);let source:SceneSource;
     try{source=JSON.parse(await fs.readFile(await projectPath(root,folder+'/last-good.json'),'utf8')) as SceneSource;}
     catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;source=JSON.parse(await fs.readFile(await projectPath(root,folder+'/previous.json'),'utf8')) as SceneSource;}

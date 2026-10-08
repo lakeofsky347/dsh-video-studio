@@ -6,6 +6,7 @@ import {createHash, randomUUID} from 'node:crypto';
 import type {Asset, AudioClip, EnvironmentSettings, TtsSettings, VideoProject} from '../shared/types.js';
 import {compileSpec} from '../core/index.js';
 import {ProjectStore, projectPath} from './store.js';
+import {findToolExecutable, isExecutableFile, type ToolEnvironmentOptions} from './tool-environment.js';
 
 export interface AudioMetadata {duration:number;sampleRate:number;channels:number;mime:string;extension:string}
 export interface PlannedAudioClip extends AudioClip {path:string;start:number;duration:number;trimEnd:number}
@@ -13,10 +14,12 @@ export interface AudioPlan {duration:number;sampleRate:48000;channels:2;clips:Pl
 export interface AudioMix {path:string;duration:number;plan:AudioPlan}
 
 function aborted(signal?:AbortSignal):void {signal?.throwIfAborted();}
-export function audioExecutable(name:'ffmpeg'|'ffprobe',configured?:string):string {
-  if(configured)return configured;
-  const paths=['/opt/homebrew/bin','/usr/local/bin',...(process.env.PATH??'').split(path.delimiter)];
-  const found=paths.map(folder=>path.join(folder,process.platform==='win32'?name+'.exe':name)).find(file=>existsSync(file));
+export function audioExecutable(name:'ffmpeg'|'ffprobe',configured?:string,options:ToolEnvironmentOptions={}):string {
+  if(configured){
+    if(!(options.isExecutable??isExecutableFile)(configured,options.platform??process.platform))throw new Error(name+' 配置路径不可执行，请在环境页检查路径：'+configured);
+    return configured;
+  }
+  const found=findToolExecutable(name,options);
   if(!found)throw new Error(name+' 未就绪，请在环境页配置路径');return found;
 }
 function stop(child:ChildProcess):void {

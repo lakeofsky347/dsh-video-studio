@@ -1,0 +1,53 @@
+name: Platform checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  basic:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DSH_RUNTIME: ${{ runner.temp }}/dsh-video-host
+      DSH_REQUIRE_SYMLINK_TESTS: '1'
+      DSH_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Enable real Windows symlinks
+        if: runner.os == 'Windows'
+        run: |
+          $key = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock'
+          New-Item -Path $key -Force | Out-Null
+          New-ItemProperty -Path $key -Name AllowDevelopmentWithoutDevLicense -Value 1 -PropertyType DWord -Force | Out-Null
+      - name: Verify symlink privilege
+        run: node scripts/check-symlink-permission.mjs
+      - name: Install locked plugin dependencies
+        run: npm ci --legacy-peer-deps --ignore-scripts --no-audit --no-fund
+      - name: Install the official host outside the checkout
+        run: npm install --prefix "$env:DSH_RUNTIME" --ignore-scripts --no-audit --no-fund --save-exact @deepseek-ai/dsh@0.2.0-rc.2
+      - name: Link matching host peers
+        run: node scripts/link-host-dependencies.mjs "$env:DSH_RUNTIME/node_modules"
+      - name: Record runtime and local media availability
+        run: node --import tsx --input-type=module -e "import {detectEnvironment} from './src/host/renderer.ts'; console.log(JSON.stringify({platform:process.platform,arch:process.arch,node:process.version,media:detectEnvironment()},null,2));"
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build

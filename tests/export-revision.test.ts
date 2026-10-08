@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {createHash,randomUUID} from 'node:crypto';
@@ -15,22 +14,23 @@ import type {HostContext} from '../src/host/platform.js';
 import type {SceneSource,StudioSnapshot} from '../src/shared/types.js';
 
 const env=detectEnvironment(),exec=promisify(execFile),available=env.browserAvailable&&env.ffmpegAvailable&&env.ffprobeAvailable;
-const assets=fileURLToPath(new URL('../artifacts/examples/native-30s-project/assets/',import.meta.url));
 const digest=(source:SceneSource)=>createHash('sha256').update(JSON.stringify(source,null,2)+'\n').digest('hex');
 function source(marker:string,background:string):SceneSource{return {
   html:'<section class="revision-scene"><h1></h1><p></p></section>',
   css:'.revision-scene{position:absolute;inset:0;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}.revision-scene h1{position:absolute;left:7%;top:17%;width:46%;font-size:34px;line-height:1.25;white-space:pre-wrap;margin:0}.revision-scene p{position:absolute;left:7%;bottom:13%;font-size:17px;line-height:1.4}',
-  js:`export function render(ctx){const {root,ctx2d:g,width:w,height:h,params:p}=ctx;g.fillStyle='${background}';g.fillRect(0,0,w,h);const image=ctx.assets.find(a=>a.kind==='image'&&a.image);if(image){const s=Math.min(w*.31/image.image.naturalWidth,h*.78/image.image.naturalHeight);g.drawImage(image.image,w*.76-image.image.naturalWidth*s/2,h*.5-image.image.naturalHeight*s/2,image.image.naturalWidth*s,image.image.naturalHeight*s);}root.querySelector('h1').textContent='${marker} · '+p.text;root.querySelector('p').textContent='中文、真实图片与本地音轨';g.fillStyle='#b8dcc8';g.fillRect(w*.07,h*.9,w*.86*ctx.progress,3);}`
+  js:`export function render(ctx){const {root,ctx2d:g,width:w,height:h,params:p}=ctx;g.fillStyle='${background}';g.fillRect(0,0,w,h);const image=ctx.assets.find(a=>a.kind==='image'&&a.image);if(!image)throw new Error('Test image did not decode');const s=Math.min(w*.31/image.image.naturalWidth,h*.78/image.image.naturalHeight);g.drawImage(image.image,w*.76-image.image.naturalWidth*s/2,h*.5-image.image.naturalHeight*s/2,image.image.naturalWidth*s,image.image.naturalHeight*s);root.querySelector('h1').textContent='${marker} · '+p.text;root.querySelector('p').textContent='中文、测试图片与本地音轨';g.fillStyle='#b8dcc8';g.fillRect(w*.07,h*.9,w*.86*ctx.progress,3);}`
 };}
 async function value(service:StudioService,endpoint:string,payload:unknown={}):Promise<any>{const result=await service.rpc(endpoint,payload);assert.equal(result.ok,true,result.ok?'':result.error.message);return result.ok?result.value:undefined;}
 async function settled(service:StudioService):Promise<StudioSnapshot>{let snapshot=await service.snapshot();const deadline=Date.now()+30_000;while(snapshot.task?.status==='running'&&Date.now()<deadline){await new Promise(resolve=>setTimeout(resolve,20));snapshot=await service.snapshot();}assert.equal(snapshot.task?.status,'complete',JSON.stringify(snapshot.task));return snapshot;}
 
-test('pinned source revision exports after source edit and physical shot deletion; restart exports second version without replacing the first',{skip:!available},async()=>{
+test('pinned source revision exports after source edit and physical shot deletion; restart exports second version without replacing the first',{skip:available?false:'Real media test requires executable Chromium, FFmpeg and ffprobe; export behavior was not verified.'},async()=>{
   const base=await fs.mkdtemp(path.join(os.tmpdir(),'dsh-export-revision-')),store=new ProjectStore({baseDirectory:base}),renderer=new VideoRenderer(store);let service:StudioService|undefined;
   try{
     const project=createProject('成片版本与完整源码快照');project.shots=project.shots.slice(0,2);project.shotOrder=project.shots.map(s=>s.id);project.target={width:640,height:360,fps:{num:12,den:1},audioMode:'mixed',quality:'standard'};project.targetDuration=2;for(const shot of project.shots)shot.durationFrames=12;
-    project.shots[0]!.params.text='旧版本镜头一';project.shots[1]!.params.text='旧版本镜头二';const created=await store.create(project),files=(await fs.readdir(assets)).filter(name=>name.endsWith('.webp')).sort();assert.ok(files.length);
-    const image=await store.importAsset(created.root,{path:path.join(assets,files[0]!),name:'既有真实图片'},env),tone=path.join(base,'验收测试音.wav');await exec(env.ffmpegPath,['-hide_banner','-loglevel','error','-y','-f','lavfi','-i','sine=frequency=440:sample_rate=48000:duration=0.5','-c:a','pcm_s16le',tone]);const audio=await store.importAudio(created.root,{path:tone,name:'本地合成验收音'},env);
+    project.shots[0]!.params.text='旧版本镜头一';project.shots[1]!.params.text='旧版本镜头二';const created=await store.create(project);
+    const {stdout:png}=await exec(env.ffmpegPath,['-hide_banner','-loglevel','error','-f','lavfi','-i','color=c=red:s=64x64:d=0.1','-frames:v','1','-f','image2pipe','-vcodec','png','pipe:1'],{encoding:'buffer',maxBuffer:1_000_000});
+    const image=await store.importImageOrText(created.root,{dataBase64:png.toString('base64'),mime:'image/png',name:'本地合成测试图片'});assert.equal(image.width,64);assert.equal(image.height,64);
+    const tone=path.join(base,'验收测试音.wav');await exec(env.ffmpegPath,['-hide_banner','-loglevel','error','-y','-f','lavfi','-i','sine=frequency=440:sample_rate=48000:duration=0.5','-c:a','pcm_s16le',tone]);const audio=await store.importAudio(created.root,{path:tone,name:'本地合成验收音'},env);
     const first=structuredClone(created.project);first.revision++;first.assets.push(image,audio);for(const shot of first.shots)shot.assetIds=[image.id];first.audioClips=[{id:randomUUID(),assetId:audio.id,role:'music',startSeconds:0,trimStart:0,trimEnd:.5,volume:.2,fadeIn:.05,fadeOut:.05,loop:true}];
     const oldSources={[first.shots[0]!.id]:source('OLD-A','#24404c'),[first.shots[1]!.id]:source('OLD-B','#403148')},pinned=await store.commit(created.root,first,oldSources,{expectedRevision:created.project.revision,label:'固定待导出旧版本'});
     const before=await renderer.capture(created.root,pinned,env,17),next=structuredClone(pinned),survivor=next.shots[0]!,deleted=next.shots[1]!;next.revision++;survivor.durationFrames=24;survivor.params.text='新版本单一镜头';next.shots=[survivor];next.shotOrder=[survivor.id];delete next.extensions.graphEdges;const newSource=source('NEW-C','#203f25');const current=await store.commit(created.root,next,{[survivor.id]:newSource},{expectedRevision:pinned.revision,label:'改源码并删除第二镜头'});

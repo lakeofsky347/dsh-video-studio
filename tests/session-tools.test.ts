@@ -68,8 +68,9 @@ test('new project services share the DSH model catalog and explicitly configured
     const catalog=await hub.call<StudioSnapshot>('catalog');assert.equal(catalog.providers[0]!.models[0]!.id,'existing-model');
     const a=await hub.call<StudioSnapshot>('create',{title:'模型目录 A',select:false}),b=await hub.call<StudioSnapshot>('create',{title:'模型目录 B',select:false});
     assert.deepEqual(a.providers,catalog.providers);assert.deepEqual(b.providers,catalog.providers);
-    const configured=await hub.call<StudioSnapshot>('tts',{projectId:a.project!.id,endpoint:'local:say',enabled:true,voice:'Tingting',speed:1});
-    assert.ok(configured.project);assert.equal(configured.tts!.voice,'Tingting');
+    // This tests configuration sharing; it never invokes a speech provider.
+    const configured=await hub.call<StudioSnapshot>('tts',{projectId:a.project!.id,endpoint:'https://tts.example/v1',model:'fixture-model',enabled:true,voice:'fixture-voice',speed:1});
+    assert.ok(configured.project);assert.equal(configured.tts!.voice,'fixture-voice');
     const second=await hub.call<StudioSnapshot>('current',{projectId:b.project!.id});assert.deepEqual(second.tts,configured.tts);assert.deepEqual(second.providers,catalog.providers);
     assert.equal(second.tts!.apiKey,undefined);
   }finally{await hub.dispose();await rm(base,{recursive:true,force:true});}

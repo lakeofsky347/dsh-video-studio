@@ -1,0 +1,531 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-10-07T16:16:46.388960+00:00",
+  "recordedAtAsiaShanghai": "2026-10-08T00:16:46.388960+08:00",
+  "project": "dsh-video-studio",
+  "version": "0.4.0",
+  "baseHead": "8a3eebe3e9dfa074f3c4e96515c7a0999a3b4f5d",
+  "result": "BASE_IMPLEMENTATION_VERIFIED_ON_LINUX; NATIVE_PLATFORM_ACCEPTANCE_PENDING",
+  "environment": {
+    "os": "Debian GNU/Linux 13.6",
+    "platform": "linux",
+    "arch": "x64",
+    "node": "24.19.0",
+    "npm": "11.9.0",
+    "chromium": "151.0.7922.173",
+    "ffmpeg": "7.1.5",
+    "ffprobe": "7.1.5",
+    "displaySession": false,
+    "dshHost": "0.2.0-rc.2"
+  },
+  "verificationPermission": "Command-scoped local socket/IPC network permission; no global network policy change",
+  "checks": {
+    "typecheck": {
+      "status": "PASS",
+      "exitCode": 0,
+      "command": "npm run typecheck",
+      "evidence": "platform-adaptation-dsh-video-studio-typecheck-final.log"
+    },
+    "test": {
+      "status": "PASS",
+      "exitCode": 0,
+      "command": "npm test",
+      "evidence": "platform-adaptation-dsh-video-studio-test-final.log",
+      "tests": 179,
+      "passed": 177,
+      "failed": 0,
+      "skipped": 2,
+      "cancelled": 0,
+      "todo": 0,
+      "skipReason": "Two macOS native system narration cases are unavailable on Linux; no media tool skip on current host"
+    },
+    "build": {
+      "status": "PASS",
+      "exitCode": 0,
+      "command": "npm run build",
+      "evidence": "platform-adaptation-dsh-video-studio-build.log"
+    },
+    "officialCliPreview": {
+      "status": "PASS",
+      "scope": "Official CLI with fresh isolated profile and local fixed model; authenticated browser, home, current RPC, zero page errors",
+      "originalCheckedAt": null,
+      "evidenceRecordedAt": "2026-10-07T16:14:00.123Z",
+      "evidence": "dsh-portable-preview-evidence.json",
+      "modelQualityVerified": false
+    },
+    "fixtureRepair": {
+      "status": "PASS",
+      "originalFailureEvidence": "platform-adaptation-dsh-video-studio-test.log",
+      "reason": "Legacy global speech-sharing fixture enabled macOS say on Linux; replaced only fixture settings with an explicit HTTPS fixture endpoint, model and voice. Sharing assertions retained; no speech HTTP call."
+    },
+    "pluginPackage": {
+      "status": "PASS",
+      "scope": "TGZ own files compared against current lib/docs/README/package metadata; extracted outside source with official external peers, backend import and bundled playwright-core resolution",
+      "nativeInstallationVerified": false,
+      "evidence": "platform-adaptation-archive-verification.json"
+    }
+  },
+  "implemented": [
+    "Windows-compatible optional directory fsync while preserving file write/rename/I/O failures",
+    "Portable project names and case/Unicode/ancestor collision checks; historical snapshots retained",
+    "Host-specific browser/FFmpeg discovery, executable validation and explicit-path error preservation",
+    "Actual local speech capability gating; unsupported hosts use imported audio or an explicitly configured speech endpoint",
+    "Cross-platform injected tests plus three-OS CI definitions; remote CI not executed",
+    "Contained macOS open/Linux xdg-open/Windows explorer.exe handoff, argv without shell, owned helper timeout and cleanup",
+    "Portable official CLI resolution, Windows npm-shim/junction support and external official peer linking",
+    "Real generated image fixture replaces ignored historical image dependency without weakening media assertions"
+  ],
+  "acceptanceLimits": {
+    "windowsNative": "NOT_CHECKED",
+    "macosNativeRegression": "NOT_CHECKED",
+    "linuxDesktopGui": "NOT_CHECKED",
+    "remoteCi": "NOT_RUN",
+    "paidModelOrSpeechProvider": "NOT_CALLED",
+    "fullHumanPlayback": "NOT_CHECKED",
+    "nativeFileOpen": "NOT_CHECKED; dispatcher, containment and process lifetime tested",
+    "officialDesktopInstallation": "NOT_CHECKED",
+    "narrowWindowFocus": "Existing 780px / 2px horizontal overflow remains; later focus assertion not executed",
+    "remainingHistoricalNativeScripts": "prepare-native.mjs remains macOS-only; historical verify scripts need dedicated Windows/Linux native acceptance entrypoints"
+  },
+  "sourceSnapshot": {
+    "scope": "src, scripts, tests, .github, package.json, package-lock.json, tsconfig.json; excludes documentation, builds, user data and secrets",
+    "capturedAt": "2026-10-07T16:16:46.388960+00:00",
+    "sha256": "f903b1da2d35ec9b67441a2128717080754fa5ea7a9f1b1f424b546f706ce94c",
+    "files": [
+      {
+        "path": ".github/workflows/platform-checks.yml",
+        "sha256": "208aa2514c9c8f5dbee01e4e4f5483bcf26e2a2eab2239354001b9251f241953"
+      },
+      {
+        "path": "package-lock.json",
+        "sha256": "12f0d8fad11c3f27d8a83cf657c14de02939e1ec1ad73a4ed35d6bba925904c9"
+      },
+      {
+        "path": "package.json",
+        "sha256": "e967c4dac57f1388b086cfa4a57f1829950048cf00989a01ba933d237a7219bd"
+      },
+      {
+        "path": "scripts/GRAPH_VERIFICATION.md",
+        "sha256": "de3d3c9aa1aadae28fab4b7c38a7b344fa2700acb2d533fbe517f0ca3a8b7000"
+      },
+      {
+        "path": "scripts/build.mjs",
+        "sha256": "cd5d94e4f291d5dabdb0a75a4f27b3341387584ea411b531a1aec3263a709b4b"
+      },
+      {
+        "path": "scripts/check-symlink-permission.mjs",
+        "sha256": "cd90774a5a0e122d47286572c85073b15ef45272a280e0016fa0e80bd0cab4f7"
+      },
+      {
+        "path": "scripts/dev-environment.d.mts",
+        "sha256": "ee2970e74c3dd1ca1efc61493f632fe328d4306a601df4079861c2c9fe3ba040"
+      },
+      {
+        "path": "scripts/dev-environment.mjs",
+        "sha256": "e588bcdc0e2029a090b28560e373c8d40bb2547275bfc90e9a4269fb96c8aa8d"
+      },
+      {
+        "path": "scripts/finalize-delivery.mjs",
+        "sha256": "837a2363f8133212a52e19d3fc6fd45c6811fee29d3e0a6a91583fa1f4f3cd3e"
+      },
+      {
+        "path": "scripts/finalize-v03.mjs",
+        "sha256": "3377a90024a38dfa41626462009744f13074f7bd0639df22f1bba3833782c6ee"
+      },
+      {
+        "path": "scripts/finalize-v04.mjs",
+        "sha256": "06a8148426cfc0935e77a588ad8a006d798bf1ba9689a57bb0aca9ec42e14611"
+      },
+      {
+        "path": "scripts/finalize-v2.mjs",
+        "sha256": "a519189b0606592b3784693f1ecaa7fa635f3c011983bd8fb3cdd5424b8866f8"
+      },
+      {
+        "path": "scripts/graph-listener-probe.mjs",
+        "sha256": "a541ae480ae013d73570db84328b60ec07fcc2a95b1a171926b97f0dc1a039ba"
+      },
+      {
+        "path": "scripts/inspect-ui.mjs",
+        "sha256": "712606538f1b21fcb7814f0062aaaad3229e96e1435fcded48de679a9a7c9878"
+      },
+      {
+        "path": "scripts/link-host-dependencies.mjs",
+        "sha256": "4f6f28a1c296ba222d6fb9ad1a3a242b04766ad844d4b1595ed87f683aca57f0"
+      },
+      {
+        "path": "scripts/package-delivery.mjs",
+        "sha256": "ae388eb7892390d07b69400d21d19fe52c435a3ef396afdf32fe578682abe782"
+      },
+      {
+        "path": "scripts/prepare-local.mjs",
+        "sha256": "d0811b9ee6a6ff4b4279433c4ca9c72637c54d9f94257e5300a64b64463f9f42"
+      },
+      {
+        "path": "scripts/prepare-native.mjs",
+        "sha256": "52a5f11b6a28a1f0cf4ab8864de8427c73e02ae761777d1af939e4a4732e5d67"
+      },
+      {
+        "path": "scripts/preview.mjs",
+        "sha256": "93e218f0d42c980315c50efddadbf0120c3218c38c5c32bc54897d6fdb5c408c"
+      },
+      {
+        "path": "scripts/verify-agent-restart-v04.mjs",
+        "sha256": "83a68b95bd19556b1006573b565db3aa2471606d960c097e7c18ffbf46842498"
+      },
+      {
+        "path": "scripts/verify-agents-v04.mjs",
+        "sha256": "78cecd15e0b3534bf596e509bde354111ae9cf27e2e61e6d6900732a1e772c81"
+      },
+      {
+        "path": "scripts/verify-client-v2-followup.mjs",
+        "sha256": "03bd0e5a183c78db3b80a79ffa0759fb27410781ece8211625edc7759d9826a7"
+      },
+      {
+        "path": "scripts/verify-client-v2.mjs",
+        "sha256": "e5b952a18cc2c3fee3ffc07dd94418e01f248db40dfa1c83678be99a05cc5342"
+      },
+      {
+        "path": "scripts/verify-flow.mjs",
+        "sha256": "bb2f8b386b3ff51216e8e29ff4853d398094b56bb9f78be515b41192a96f280e"
+      },
+      {
+        "path": "scripts/verify-frame-shot-consistency.mjs",
+        "sha256": "f9d52cf206f7a98803eeec4cfa8e9c777df297c6581b8a4afa72886ed3a469a9"
+      },
+      {
+        "path": "scripts/verify-graph-lifecycle.mjs",
+        "sha256": "e9752e2a1f6abe53de1659e78510d2b9812cbae5b69f4cca7f15d12079b64375"
+      },
+      {
+        "path": "scripts/verify-graph.mjs",
+        "sha256": "672f17139013bb63170dc375b2175c334aceeb7b3d63289aa0eb59fe8b842af8"
+      },
+      {
+        "path": "scripts/verify-home-v04.mjs",
+        "sha256": "3bf78539e7273bd94b71387409debff5268705ec6b4ba4182b8f7bcefe9ed4bd"
+      },
+      {
+        "path": "scripts/verify-legacy-v03.mjs",
+        "sha256": "9ed1fb16554d60559e0e51f51ee310721aa7696fb033475d39f39aba6f87fc6c"
+      },
+      {
+        "path": "scripts/verify-media-v03.mjs",
+        "sha256": "4445655ac4d02f41aab6caa3ad369a763d9fa90ab0f3d67f478db9e4fa517dba"
+      },
+      {
+        "path": "scripts/verify-media-v2.mjs",
+        "sha256": "b621f7b293642196bb70c9be50545930d8085cb5e6b4d193ec31dde843e222a2"
+      },
+      {
+        "path": "scripts/verify-native-media-v04.mjs",
+        "sha256": "c32b5b63841f3b9bd9b593e7364e3b42ecb7b00f4ad59e27e2e9a2ffeae80bc4"
+      },
+      {
+        "path": "scripts/verify-native-session-restart.mjs",
+        "sha256": "8877931e2c819488c375e3c58622a34b291ccce562d1170ec5a43591b1d17135"
+      },
+      {
+        "path": "scripts/verify-native-v2.mjs",
+        "sha256": "80bf4a18cda861a05a6853f2d8f50c9497532766531ce533a2dc63bf6dd755c6"
+      },
+      {
+        "path": "scripts/verify-native.mjs",
+        "sha256": "36e070407946a22a445f7ddbd2e805d49133155bb3c294bba9327b70cbf8d0c3"
+      },
+      {
+        "path": "scripts/verify-preview-size.mjs",
+        "sha256": "bac5192221c44318b3ccc53a9e973348cbc616363fa30188f1f979107ad3856e"
+      },
+      {
+        "path": "scripts/verify-restart-v04.mjs",
+        "sha256": "879abf7c4370cebdb2e881cdd51e4be1575340717af5373f047036d5b74fdaf7"
+      },
+      {
+        "path": "scripts/verify-session.mjs",
+        "sha256": "dd1f85d5a6da621ba141a1ad66915b01d090d615222cdcfe32eccb5e49f12809"
+      },
+      {
+        "path": "scripts/verify-theme-v04.mjs",
+        "sha256": "0695700bf564cf754871fa46429d64a52cca3f3fd44983ddc4a0044305b4effa"
+      },
+      {
+        "path": "scripts/verify-v03.mjs",
+        "sha256": "d20c26772dbdc84baa196bbbf32985f1017bb7c4c7f06cc39f3b6e6dcc7d8d1d"
+      },
+      {
+        "path": "scripts/verify-web.mjs",
+        "sha256": "ec60f30e8faea0882f411b38eeada5aae9fe461ccb8d044d1b379ac35c55f7a4"
+      },
+      {
+        "path": "src/client/AudioPanel.tsx",
+        "sha256": "869b72be930ce5fc63dc3c144007561918cae3aff43a6ef97d3cf4c02e4063f9"
+      },
+      {
+        "path": "src/client/Dialog.tsx",
+        "sha256": "fa65e35ccbc42561841506f4bd2607be8b8a5ecc1a3a40554e4829041a6d306a"
+      },
+      {
+        "path": "src/client/ExportPanel.tsx",
+        "sha256": "79089c14eb88c55cb4e2e6c1d777c358490463d2de55f69c15477b29b2e33e6c"
+      },
+      {
+        "path": "src/client/Preview.tsx",
+        "sha256": "10fd685be207da69a0a3cce7f168b4684c00cd64f3c8f670eb22ba1df15e2fc5"
+      },
+      {
+        "path": "src/client/ProjectHome.tsx",
+        "sha256": "917f68ef99814dc78c4f1e06955875b3bbce4e91ab238085cf6070b5551451a5"
+      },
+      {
+        "path": "src/client/SessionPicker.tsx",
+        "sha256": "f6f6b152a9654691b8814939ca28c2c48614fa2d98640cffd6d3e964d89abf0b"
+      },
+      {
+        "path": "src/client/SourceEditor.tsx",
+        "sha256": "36849a04da42a15761dbb202ad899910634a158a8eaa55468fac17fdde8c9bb9"
+      },
+      {
+        "path": "src/client/Studio.tsx",
+        "sha256": "a99a3f6f50a08009222a5bcb90eccaf988367eb854e800392e6ca63dae92601c"
+      },
+      {
+        "path": "src/client/TaskPanel.tsx",
+        "sha256": "17ac814a05503885e26d62d2546ce1c19f57bb1e9972cd158b730a505decc9c8"
+      },
+      {
+        "path": "src/client/controller.ts",
+        "sha256": "a4e8c37abfbe37cf239cfce79b16842e165635104b9c5d81fa810c0daa23726e"
+      },
+      {
+        "path": "src/client/graph-adapter.ts",
+        "sha256": "53b4bdc25124e6ccd0e914e40bb2192a2a20d24787d540db709f456a48a06d42"
+      },
+      {
+        "path": "src/client/index.tsx",
+        "sha256": "31b7e0781b12b3fd9b87bd70e52ff76da47c344aa710268938201e7f12fd5e1a"
+      },
+      {
+        "path": "src/client/output-settings.tsx",
+        "sha256": "a149d048723a99bcb9dff5fb016574fec446386b78194d2425b3aab86de3a9d7"
+      },
+      {
+        "path": "src/client/project-format.ts",
+        "sha256": "8972f33555b57e990e5de696d030c23abe4e576ca7271f21c9a0bed6fcc484d6"
+      },
+      {
+        "path": "src/client/session-directory.ts",
+        "sha256": "74885799b3e86d07e4615459b62f097d5ebb0e1f1a0c8a4b608136b974a6462c"
+      },
+      {
+        "path": "src/client/session-host-adapter.ts",
+        "sha256": "5f06afe6b7715a5f50203b29f8d9503c3f238ec5200af70871e5332afc644c53"
+      },
+      {
+        "path": "src/client/source-drafts.ts",
+        "sha256": "7457f98f90d4d9924a13bbfb66265c3dd077ef81e0fe25b376f2ca4c31c04c04"
+      },
+      {
+        "path": "src/client/styles.css",
+        "sha256": "99fa22f155468516208dd9b5ed865d23542a9ae697b42d0bcab15fffb08c1f09"
+      },
+      {
+        "path": "src/core/default-source.ts",
+        "sha256": "22865e0e312603d66d244aef9ebe9c2a47680f586082d0dbd7f5b5e96984bc8e"
+      },
+      {
+        "path": "src/core/index.ts",
+        "sha256": "e27bf0f2f4b2c04ea9d985410f8aed8afebcc62ab6c09b57af8def4f322f3055"
+      },
+      {
+        "path": "src/core/project-paths.ts",
+        "sha256": "d4504ff601ba131f8a5aab764da7cf0f0bae83d9e4a063d70686bd4d6822e41e"
+      },
+      {
+        "path": "src/host/audio.ts",
+        "sha256": "0a5194fe31b473092c71dcde94f4a7515e808da4c98f3575ca72920ded76fc7c"
+      },
+      {
+        "path": "src/host/directory-sync.ts",
+        "sha256": "dbb644af94f90b6461dc7ee57757f0a344772e0d361ceb83541227c87c5c5600"
+      },
+      {
+        "path": "src/host/file-opener.ts",
+        "sha256": "506e6ef9ba9e03295549de2ca431fe5e56bb75b73201be2cbcfce92c51984911"
+      },
+      {
+        "path": "src/host/generator.ts",
+        "sha256": "03db73c87edfe31e975da02a77542aa5d0f88d3cb5bd4042e2b3b118be6c6d7d"
+      },
+      {
+        "path": "src/host/index.ts",
+        "sha256": "94e532d7864a3f50b9258fbb5edb04aa8d9887e986531b0de6dfedc0648b8880"
+      },
+      {
+        "path": "src/host/platform.ts",
+        "sha256": "49c50068f1aa120dd94d017cd423502a9cedd9cb8297ce964aa00d1826940464"
+      },
+      {
+        "path": "src/host/project-hub.ts",
+        "sha256": "85a6731ed10266ea89073d4bf4037e03d714543f3e9a8badb55b3d22960a60e4"
+      },
+      {
+        "path": "src/host/renderer.ts",
+        "sha256": "b48b3f96ae5c684ef472f82224eeec7ec9824a0030eec9a6760ce07f4158a87e"
+      },
+      {
+        "path": "src/host/service.ts",
+        "sha256": "076ab45dff3471cfc1a70b2868b2b4fbee5c1cd3cd1221ce9354845bff3e12cb"
+      },
+      {
+        "path": "src/host/session-tools.ts",
+        "sha256": "af78fa34746ce0f0d0c9e2a576a14410970ebdd0b17150f4654660b1a055c563"
+      },
+      {
+        "path": "src/host/store.ts",
+        "sha256": "8306a7f734d8d907bb500b3163297ed4a95f13b77bceb06f0fdec1c6477e5e10"
+      },
+      {
+        "path": "src/host/tool-environment.ts",
+        "sha256": "024d88c617323e2eb5ab0396a71df526115375ddb668baf457a310d4e22ac8c8"
+      },
+      {
+        "path": "src/runtime/browser.ts",
+        "sha256": "1f069c83bc189011b1b908044bda595a0dd4ea9e7cc6ad128ac30ff583605494"
+      },
+      {
+        "path": "src/shared/tts-capability.ts",
+        "sha256": "21ff29bda5942df242131c2dcc494fa4daa6ee5109bf107e3a7e0164e63483ff"
+      },
+      {
+        "path": "src/shared/types.ts",
+        "sha256": "336a002f1b872615df73218ed18dbf6a94770b8918e283aac50f6dea9d91c853"
+      },
+      {
+        "path": "tests/audio-service.test.ts",
+        "sha256": "8d9d460dddf9b75c4ddc14add1003ed887a718b11d494fcc8ef54a086617c8ba"
+      },
+      {
+        "path": "tests/audio.test.ts",
+        "sha256": "651b32dad2ff809230b888f6428f1272cefe271657d611ef3f9350a9cc177de9"
+      },
+      {
+        "path": "tests/client-settings.test.ts",
+        "sha256": "52b2b864f80fded90acd97c900550f1beb904995ccc4cfff195490588dce7691"
+      },
+      {
+        "path": "tests/client-v3.test.ts",
+        "sha256": "d22b548a0bad7832e383cc6af6ff9a3d807faf543d412fb5addcdc54e3925862"
+      },
+      {
+        "path": "tests/controller.test.ts",
+        "sha256": "679faf32a1f8f90046205e96afec7667cdc0b2392617a4ff09b58c7a06136015"
+      },
+      {
+        "path": "tests/core.test.ts",
+        "sha256": "335d4ea5fa6768a18333bd210e701201637a75b4fc3b196120676addaabb4273"
+      },
+      {
+        "path": "tests/development-scripts.test.ts",
+        "sha256": "e782b701c74d538046efcdda0253798f8fe0e2a9b23f26c2f330d7b773575d99"
+      },
+      {
+        "path": "tests/export-revision.test.ts",
+        "sha256": "bca59e3f968c7c6dca1e8d981e7911a5a9e0aa76f81fec0f190312e8b49055bf"
+      },
+      {
+        "path": "tests/file-opener.test.ts",
+        "sha256": "5376f9461257a892c0d9ddd47351b64dfa65af87c7860e0ab6153f641b2d0c21"
+      },
+      {
+        "path": "tests/fixtures/fixture-response.mjs",
+        "sha256": "38d40737031489b1804e44e865fae195404601103121a84ce15488c364611eb6"
+      },
+      {
+        "path": "tests/fixtures/home-team-provider.mjs",
+        "sha256": "6848b7899a9396491090d48739c51f0fd6c1822bca7344c5487b8fc1f29d5c42"
+      },
+      {
+        "path": "tests/fixtures/preview-provider.mjs",
+        "sha256": "a9cba40897b0b775ec25e45eae150ece209febd173c9251d10ced4219423ab7e"
+      },
+      {
+        "path": "tests/fixtures/session-provider.mjs",
+        "sha256": "e29f09e04cd78fb4403cc56ec8357fa0e939825436ef20b315e37fc4f8cd81e5"
+      },
+      {
+        "path": "tests/fixtures/symlink.ts",
+        "sha256": "d77bf0e07157788e994501d4830500c190e93f3f2c4bd207dad1f7005bf716d3"
+      },
+      {
+        "path": "tests/home-controller-v04.test.ts",
+        "sha256": "1783efcf77a15b5b813ab18a65b0bbf3333f9fbd056d1ac709577ea22ca07fa4"
+      },
+      {
+        "path": "tests/project-library.test.ts",
+        "sha256": "bead28b8519289356f1cc2c0d9d7c996c7ff2f247669743d3ddb3c16e332ae41"
+      },
+      {
+        "path": "tests/project-paths.test.ts",
+        "sha256": "c3d48c3b37462857034c9d0db073fd59618b213a3ea8a8cdb23d2b73e1f8869d"
+      },
+      {
+        "path": "tests/renderer.test.ts",
+        "sha256": "002e32f68d6d14bc8420b32ec4c43f871c89f9808e78dfa367e804dd314465e1"
+      },
+      {
+        "path": "tests/service-persistence.test.ts",
+        "sha256": "bc4e035f2bc138a607c6eaaa0f47ad0b372d5b9385f3a8f88ada0328e8d38b8a"
+      },
+      {
+        "path": "tests/service.test.ts",
+        "sha256": "2942cbd7da50797911b0d047e031f51266472c21bb341036e8273b977ab82fea"
+      },
+      {
+        "path": "tests/session-directory-v04.test.ts",
+        "sha256": "dadb74f992e47112fb7183b3ff87399ef82014d607b3bf48e3f5aee03c85a17a"
+      },
+      {
+        "path": "tests/session-relations.test.ts",
+        "sha256": "ca6db3925772be782ced06c85d14a322480b8c820d524dd0ef87e6f603a78a99"
+      },
+      {
+        "path": "tests/session-tools.test.ts",
+        "sha256": "b0e9abd89dc07e880a7197b8312f5da0b85ffaf7a3b77d41f7f4bd4f3f0dcaf1"
+      },
+      {
+        "path": "tests/source-drafts.test.ts",
+        "sha256": "fb61c5c3545f4ffffec42636b78d5def2a1a32da5a8ecc0178f919ceca640125"
+      },
+      {
+        "path": "tests/storage-platform.test.ts",
+        "sha256": "20a6b31fd39f8e5c54eb1935b490e817b4643a0a3a3af9533bf0e7bfa1cda181"
+      },
+      {
+        "path": "tests/storage.test.ts",
+        "sha256": "be6282f64dbcb559524227cb8a30ec8fcf3b1689670dd98a7c0ba961898bfdec"
+      },
+      {
+        "path": "tests/tool-environment.test.ts",
+        "sha256": "63d2e5219687dca42fe38cf35035afb792cebbdf80428cf6eb90ea3234bd27d4"
+      },
+      {
+        "path": "tests/tts-capability.test.ts",
+        "sha256": "63cb587f46cc10b82397cae599b055985e521544a4dd2b050b0fc2da6686e374"
+      },
+      {
+        "path": "tests/tts-platform-service.test.ts",
+        "sha256": "4cfb89fab945cfc2c52137cdf061d6727ab78768237313fb389aa2a85e0c28e1"
+      },
+      {
+        "path": "tsconfig.json",
+        "sha256": "3a329d147c7b9d90d7b67321e4437c815d1f3d12b0a8b5a002d50ede9e7dd8b2"
+      }
+    ]
+  },
+  "historicalBaseline": "platform-baseline.json",
+  "evidenceDirectory": "Local .onboarding/logs; full logs intentionally excluded from repository",
+  "portableArtifact": {
+    "path": "artifacts/dsh-video-studio-0.4.0.tgz",
+    "archiveDigestLocation": "Local .onboarding/platform-adaptation.json; omitted here to avoid hashing a report embedded inside the same archive"
+  }
+}

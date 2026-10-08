@@ -1,4 +1,5 @@
 import type { Asset, Shot, VideoProject, VideoSpec, VideoTarget } from '../shared/types.js';
+import {inspectProjectPaths,safeRelativeProjectPath as safeRelativePath} from './project-paths.js';
 export { defaultSceneSource } from './default-source.js';
 
 export interface ValidationResult { ok:boolean; errors:string[]; warnings:string[] }
@@ -51,7 +52,7 @@ export function defaultShot(index=0,fps={num:30,den:1}):Shot {
 }
 
 /** Data validation permits an incomplete graph to be saved. compileSpec also validates its chain. */
-export function validateProject(project:VideoProject):ValidationResult {
+export function validateProject(project:VideoProject,options:{portablePaths?:boolean}={}):ValidationResult {
   const errors:string[]=[],warnings:string[]=[];
   if(!plainObject(project))return {ok:false,errors:['项目必须是对象'],warnings};
   if(project.schemaVersion!==1)errors.push('不支持的项目版本');
@@ -122,11 +123,8 @@ export function validateProject(project:VideoProject):ValidationResult {
     if(clip.trimEnd!==undefined&&(!Number.isFinite(clip.trimEnd)||clip.trimEnd<=clip.trimStart))errors.push(`音频片段 ${clip.id} 裁剪区间无效`);
   }
   const graph=validateGraph(project);warnings.push(...graph.errors.map(e=>`主链草稿：${e}`));
+  (options.portablePaths?errors:warnings).push(...inspectProjectPaths(project).map(issue=>issue.message));
   return {ok:errors.length===0,errors,warnings};
-}
-
-function safeRelativePath(path:string):boolean {
-  return !!path.trim()&&!path.startsWith('/')&&!path.includes('\\')&&!/^[a-zA-Z]:/.test(path)&&!path.split('/').some(p=>p==='..'||p==='.'||!p);
 }
 
 /** shotOrder is the semantic source; graph positions never determine timing. */

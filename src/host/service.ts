@@ -1,5 +1,5 @@
+import {defaultTtsSettings,validateTtsSettings} from '../shared/tts-capability.ts';
 import {randomUUID} from 'node:crypto';
-import {spawn} from 'node:child_process';
 import {readFile,writeFile,mkdir,readdir,rename,open,rm} from 'node:fs/promises';
 import {resolve,join,relative} from 'node:path';
 import {homedir} from 'node:os';
@@ -10,6 +10,7 @@ import {ProjectStore,projectPath,validateStoredProject,validateSources} from './
 import {VideoRenderer,detectEnvironment} from './renderer.ts';
 import {DshSceneGenerator,parseSceneSource,normalizeStoryboard} from './generator.ts';
 import {SpeechSynthesizer} from './audio.ts';
+import {ProjectFileOpener} from './file-opener.ts';
 
 interface TaskRequest { endpoint:'preview'|'export'|'generate'; payload:Record<string,string> }
 interface RecordedTask extends TaskState { recordVersion?:1; revision?:number; request?:TaskRequest; retryOf?:string }
@@ -24,13 +25,15 @@ export class StudioService {
   private readonly baseDirectory:string;
   private readonly restoreRecent:boolean;
   private readonly speech=new SpeechSynthesizer();
+  private readonly fileOpener:ProjectFileOpener;
   private audioUrl:string|null=null;
   private tts:TtsSettings={endpoint:'local:say',model:'',voice:'',speed:1,enabled:false};
-  constructor(private ctx:HostContext,config:{baseDirectory?:string;restoreRecent?:boolean}={}){
+  constructor(private ctx:HostContext,config:{baseDirectory?:string;restoreRecent?:boolean;fileOpener?:ProjectFileOpener}={}){
+    this.fileOpener=config.fileOpener??new ProjectFileOpener();
     this.baseDirectory=resolve(config.baseDirectory??process.env.DSH_VIDEO_PROJECTS??join(homedir(),'Documents','DSHVideoProjects'));
     this.restoreRecent=config.restoreRecent!==false;
     this.store=new ProjectStore({baseDirectory:this.baseDirectory});
-    const env=detectEnvironment();this.settings={browserPath:env.browserPath,ffmpegPath:env.ffmpegPath,ffprobePath:env.ffprobePath};
+    const env=detectEnvironment();this.tts=defaultTtsSettings(env);this.settings={browserPath:env.browserPath,ffmpegPath:env.ffmpegPath,ffprobePath:env.ffprobePath};
     this.initialized=this.initialize();
   }
   private async initialize(){
@@ -125,7 +128,7 @@ export class StudioService {
     const result=this.commands.then(work);this.commands=result.then(()=>undefined,()=>undefined);return result;
   }
   private credentials(){return this.ctx.get?.('credentials') as {set(ref:string,value:string):Promise<void>;unset?(ref:string):Promise<void>;resolve(ref:string):Promise<{value:string}|undefined>}|undefined;}
-  private async speechSettings():Promise<TtsSettings>{try{this.tts={...this.tts,...JSON.parse(await readFile(join(this.baseDirectory,'tts.json'),'utf8'))};delete this.tts.apiKey;}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}const credentials=this.credentials();const key=credentials?await credentials.resolve('DSH_VIDEO_STUDIO_TTS_API_KEY'):undefined;return {...this.tts,apiKey:key?.value};}
+  private async speechSettings():Promise<TtsSettings>{try{this.tts={...this.tts,...JSON.parse(await readFile(join(this.baseDirectory,'tts.json'),'utf8'))};delete this.tts.apiKey;}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}if(this.tts.endpoint==='local:say')return {...this.tts,apiKey:undefined};const credentials=this.credentials();const key=credentials?await credentials.resolve('DSH_VIDEO_STUDIO_TTS_API_KEY'):undefined;return {...this.tts,apiKey:key?.value};}
   private async redact(text:string):Promise<string>{
     const key=(await this.credentials()?.resolve('DSH_VIDEO_STUDIO_TTS_API_KEY'))?.value;if(key)text=text.split(key).join('[redacted]');
     return text.replace(/Bearer\s+[^\s"',;]+/gi,'Bearer [redacted]').replace(/\bsk-[a-zA-Z0-9_-]{8,}/g,'[redacted]');
@@ -246,7 +249,7 @@ export class StudioService {
         case 'save':{if(this.task?.status==='running'&&this.task.kind!=='export')this.assertIdle();const {project}=this.required();if(!data.project||data.project.id!==project.id)throw new Error('项目已切换，请刷新后重试');const next=structuredClone(data.project) as VideoProject;this.fitAudio(next);await this.persist({...next,outputs:project.outputs}, {},'保存工程');break;}
         case 'apply':await this.apply(data);break;
         case 'import':{this.assertIdle();const {root,project}=this.required();const asset=await this.store.importAsset(root,data,this.settings);const next=structuredClone(project);next.assets.push(asset);next.graph.positions[asset.id]=[60,80+(next.assets.length-1)*180];await this.persist(next,{},'导入素材');break;}
-        case 'tts':{this.assertIdle();const options:Partial<TtsSettings>={};for(const key of ['endpoint','model','voice','speed','enabled'] as const)if(data[key]!==undefined)(options as any)[key]=data[key];if(data.apiKey!==undefined){const credentials=this.credentials();if(data.apiKey){if(!credentials)throw new Error('宿主凭据服务不可用，请使用本地配音或无密钥端点');await credentials.set('DSH_VIDEO_STUDIO_TTS_API_KEY',String(data.apiKey));}else if(credentials?.unset)await credentials.unset('DSH_VIDEO_STUDIO_TTS_API_KEY');}this.tts={...this.tts,...options};await mkdir(this.baseDirectory,{recursive:true});await writeFile(join(this.baseDirectory,'tts.json'),JSON.stringify(this.tts,null,2));break;}
+        case 'tts':{this.assertIdle();const options:Partial<TtsSettings>={};for(const key of ['endpoint','model','voice','speed','enabled'] as const)if(data[key]!==undefined)(options as any)[key]=data[key];const next={...this.tts,...options};const onlyClearingKey=data.apiKey===''&&Object.keys(options).length===0;if(!onlyClearingKey)validateTtsSettings(next,detectEnvironment(this.settings));if(data.apiKey!==undefined){const credentials=this.credentials();if(data.apiKey){if(!credentials)throw new Error('宿主凭据服务不可用，请使用本地配音或无密钥端点');await credentials.set('DSH_VIDEO_STUDIO_TTS_API_KEY',String(data.apiKey));}else{if(!credentials?.unset)throw new Error('宿主凭据服务无法清除密钥，请在 DSH 凭据设置中清除');await credentials.unset('DSH_VIDEO_STUDIO_TTS_API_KEY');}}this.tts=next;await mkdir(this.baseDirectory,{recursive:true});await writeFile(join(this.baseDirectory,'tts.json'),JSON.stringify(this.tts,null,2));break;}
         case 'audio':{
           this.assertIdle();const {root,project}=this.required(),operation=data.operation??data.action;
           if(operation==='synthesize'||operation==='tts'){
@@ -292,11 +295,11 @@ export class StudioService {
         }
         case 'cancel':this.controller?.abort(new Error('用户已取消'));break;
         case 'environment':this.assertIdle();for(const key of ['browserPath','ffmpegPath','ffprobePath'] as const)if(data[key]!==undefined){if(typeof data[key]!=='string')throw new Error('执行文件路径须为字符串');this.settings[key]=data[key];}await mkdir(this.baseDirectory,{recursive:true});await writeFile(join(this.baseDirectory,'environment.json'),JSON.stringify(this.settings,null,2));break;
-        case 'reveal':{const {root}=this.required(),path=resolve(String(data.path??root));if(path!==root&&!path.startsWith(root+'/'))throw new Error('请选择本项目文件');await new Promise<void>((res,rej)=>{const child=spawn('/usr/bin/open',[path],{stdio:'ignore'});child.once('error',rej);child.once('close',code=>code===0?res():rej(new Error('打开文件失败')));});break;}
+        case 'reveal':{await this.fileOpener.open(this.required().root,data.path==null?undefined:String(data.path));break;}
         default:throw new Error('未找到插件操作');
       }
       return {ok:true,value:await this.snapshot()};
     }catch(error){return {ok:false,error:{code:error instanceof Error&&'code' in error?String(error.code):'STUDIO_ERROR',message:error instanceof Error?error.message:String(error)}};}
   }
-  async dispose(){this.disposed=true;this.controller?.abort(new Error('插件已停止'));await this.commands;await this.job;await this.commands;await this.speech.close();await this.renderer.close();}
+  async dispose(){this.disposed=true;this.controller?.abort(new Error('插件已停止'));await this.fileOpener.close();await this.commands;await this.job;await this.commands;await this.speech.close();await this.renderer.close();}
 }

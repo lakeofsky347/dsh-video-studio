@@ -1,3 +1,4 @@
+import {defaultTtsSettings,ttsCapability} from '../shared/tts-capability.ts';
 import { useEffect, useState, type ReactNode } from 'react';
 import type { Asset, AudioClip, Shot, StudioSnapshot, TtsSettings, VideoProject } from '../shared/types.ts';
 import type { StudioController } from './controller.ts';
@@ -11,14 +12,14 @@ export function AudioPanel({project,snapshot,controller,assetUrl,selectedShot,bu
   function edit(next:AudioClip[]){controller.edit({...project,audioClips:next,target:{...project.target,audioMode:next.length?'mixed':'none'},revision:project.revision+1,updatedAt:new Date().toISOString()});}
   function patch(id:string,value:Partial<AudioClip>){edit(clips.map(c=>c.id===id?{...c,...value}:c));}
   function add(){if(!assetId)return;const clip:AudioClip={id:`audio-${crypto.randomUUID()}`,assetId,role,startSeconds:0,trimStart:0,volume:role==='music'?.25:1,fadeIn:role==='music'?.5:0,fadeOut:role==='music'?.5:0,...(shotId?{shotId}:{}),...(role==='music'?{loop:true}:{})};void controller.audio({operation:'add',...clip,fitDuration:project.extensions.lockDuration!==true});}
-  const tts=snapshot.tts;
+  const tts=snapshot.tts,capability=ttsCapability(tts,snapshot.environment);
   return <div className="vs-audio-panel">
     <div className="vs-audio-heading"><div><h3>配音、音乐与音效</h3><p>导入音频后绑定镜头；全片音乐可循环。刷新预览会生成与成片相同的混音。</p></div><button onClick={()=>setSettingsOpen(!settingsOpen)}>配音模型设置</button></div>
     {settingsOpen&&<TtsConfig snapshot={snapshot} controller={controller} busy={busy}/>}
     <div className="vs-audio-add"><Field label="音频资产"><select aria-label="音频资产" value={assetId} onChange={e=>setAssetId(e.target.value)}><option value="">选择音频</option>{assets.map(a=><option key={a.id} value={a.id}>{a.name} · {(a.duration||0).toFixed(1)}s</option>)}</select></Field><Field label="用途"><select aria-label="音频用途" value={role} onChange={e=>{const next=e.target.value as AudioClip['role'];setRole(next);if(next==='music')setShotId('');}}><option value="voice">配音</option><option value="music">背景音乐</option><option value="sfx">音效</option></select></Field><Field label="绑定范围"><select aria-label="音频绑定范围" value={shotId} onChange={e=>setShotId(e.target.value)}><option value="">整部影片</option>{project.shots.map(s=><option key={s.id} value={s.id}>{s.title}</option>)}</select></Field><button disabled={busy||!assetId} onClick={add}>添加声音片段</button></div>
     {assets.length===0&&<p className="vs-audio-empty">先在资产库导入 WAV、MP3、M4A、AAC、FLAC 或 OGG；也可以填写镜头旁白并生成配音。</p>}
     <label className="vs-audio-duration-lock"><input type="checkbox" checked={project.extensions.lockDuration===true} onChange={e=>controller.edit({...project,extensions:{...project.extensions,lockDuration:e.target.checked},revision:project.revision+1,updatedAt:new Date().toISOString()})}/>锁定镜头时长<small>解除锁定时，较长旁白可自动延长对应镜头。</small></label>
-    <div className="vs-audio-narration"><Field label={selectedShot?`「${selectedShot.title}」旁白`:'镜头旁白'}><textarea aria-label="镜头旁白" rows={2} value={selectedShot?.narration||''} disabled={!selectedShot||busy} placeholder="选中镜头后填写配音文案…" onChange={e=>{if(selectedShot)controller.edit({...project,shots:project.shots.map(s=>s.id===selectedShot.id?{...s,narration:e.target.value}:s),revision:project.revision+1,updatedAt:new Date().toISOString()});}}/></Field><button disabled={busy||!selectedShot?.narration?.trim()||!tts?.enabled} onClick={()=>selectedShot&&void controller.action('audio',{operation:'synthesize',shotId:selectedShot.id,text:selectedShot.narration,fitDuration:project.extensions.lockDuration!==true,replaceVoice:true})}>生成镜头配音</button>{!tts?.enabled&&<small>在配音模型设置中启用本机或自有语音服务。</small>}</div>
+    <div className="vs-audio-narration"><Field label={selectedShot?`「${selectedShot.title}」旁白`:'镜头旁白'}><textarea aria-label="镜头旁白" rows={2} value={selectedShot?.narration||''} disabled={!selectedShot||busy} placeholder="选中镜头后填写配音文案…" onChange={e=>{if(selectedShot)controller.edit({...project,shots:project.shots.map(s=>s.id===selectedShot.id?{...s,narration:e.target.value}:s),revision:project.revision+1,updatedAt:new Date().toISOString()});}}/></Field><button disabled={busy||!selectedShot?.narration?.trim()||!tts?.enabled||!capability.available} onClick={()=>selectedShot&&void controller.action('audio',{operation:'synthesize',shotId:selectedShot.id,text:selectedShot.narration,fitDuration:project.extensions.lockDuration!==true,replaceVoice:true})}>生成镜头配音</button>{!capability.available?<small>{capability.message}</small>:!tts?.enabled&&<small>在配音模型设置中启用配音服务。</small>}</div>
     <div className="vs-audio-clips">{clips.map(c=>{const asset=assets.find(a=>a.id===c.assetId),shot=project.shots.find(s=>s.id===c.shotId);return <article className="vs-audio-clip" key={c.id}>
       <div className="vs-audio-clip-heading"><span className="vs-audio-role">{({voice:'配音',music:'音乐',sfx:'音效'})[c.role]}</span><strong>{asset?.name||'音频素材已移除'}</strong><span>{shot?shot.title:'全片'}</span><button aria-label={`删除声音片段 ${asset?.name||c.id}`} onClick={()=>edit(clips.filter(v=>v.id!==c.id))}>删除</button></div>
       {asset&&assetUrl(asset)&&<audio controls preload="metadata" src={assetUrl(asset)}/>}
@@ -29,15 +30,16 @@ export function AudioPanel({project,snapshot,controller,assetUrl,selectedShot,bu
   </div>;
 }
 export function TtsConfig({snapshot,controller,busy}:{snapshot:StudioSnapshot;controller:StudioController;busy:boolean}){
-  const defaults:TtsSettings={endpoint:'local:say',model:'',voice:'',speed:1,enabled:false};
+  const defaults=defaultTtsSettings(snapshot.environment);
   const [settings,setSettings]=useState<TtsSettings>({...defaults,...snapshot.tts}),[apiKey,setApiKey]=useState('');
-  useEffect(()=>setSettings({...defaults,...snapshot.tts}),[JSON.stringify(snapshot.tts)]);
-  const local=settings.endpoint==='local:say';
-  return <div className="vs-tts-settings"><div className="vs-audio-heading"><div><h4>配音服务</h4><p>{local?'本机 macOS 语音，不调用外部 API；声音名称留空使用系统默认。':'兼容 OpenAI Speech 的自有语音端点，按填写地址调用。'}</p></div><label><input aria-label="启用配音服务" type="checkbox" checked={settings.enabled} onChange={e=>setSettings({...settings,enabled:e.target.checked})}/>启用</label></div>
+  useEffect(()=>setSettings({...defaults,...snapshot.tts}),[JSON.stringify(snapshot.tts),snapshot.environment.localSpeechAvailable]);
+  const local=settings.endpoint==='local:say',capability=ttsCapability(settings,snapshot.environment),localUnavailable=local&&!capability.available;
+  return <div className="vs-tts-settings"><div className="vs-audio-heading"><div><h4>配音服务</h4><p>{local?'本机 macOS 语音，不调用外部 API；声音名称留空使用系统默认。':'兼容 OpenAI Speech 的自有语音端点，按填写地址调用。'}</p></div><label><input aria-label="启用配音服务" type="checkbox" disabled={busy||(localUnavailable&&!settings.enabled)} checked={settings.enabled} onChange={e=>setSettings({...settings,enabled:e.target.checked})}/>启用</label></div>
+    {!capability.available&&<p role="status">{capability.message}</p>}
     <Field label="语音端点"><input aria-label="语音端点" value={settings.endpoint} placeholder="local:say 或 https://…/audio/speech" onChange={e=>setSettings({...settings,endpoint:e.target.value})}/></Field>
     <div className="vs-field-pair"><Field label="配音模型"><input aria-label="配音模型" value={settings.model} placeholder={local?'本机无需模型':'填写模型 ID'} onChange={e=>setSettings({...settings,model:e.target.value})}/></Field><Field label="声音"><input aria-label="配音声音" value={settings.voice} placeholder={local?'系统声音名称（可留空）':'声音 ID'} onChange={e=>setSettings({...settings,voice:e.target.value})}/></Field></div>
     {!local&&<Field label="语音 API Key"><input aria-label="语音 API Key" type="password" autoComplete="new-password" value={apiKey} placeholder={snapshot.ttsConfigured?'已配置；留空保留原值':'填写服务密钥'} onChange={e=>setApiKey(e.target.value)}/></Field>}
     <Field label="语速"><input aria-label="配音语速" type="number" min="0.5" max="2" step="0.05" value={settings.speed} onChange={e=>setSettings({...settings,speed:Number(e.target.value)||1})}/></Field>
-    <div className="vs-tts-actions"><button disabled={busy} onClick={()=>void controller.action('tts',{...settings,...(apiKey?{apiKey}:{})},'配音服务配置已保存。').then(()=>setApiKey(''))}>保存配音配置</button>{snapshot.ttsConfigured&&!local&&<button disabled={busy} onClick={()=>void controller.action('tts',{...settings,apiKey:''},'语音密钥已清除。')}>清除密钥</button>}</div>
+    <div className="vs-tts-actions"><button disabled={busy||(settings.enabled&&!capability.available)} onClick={()=>void controller.action('tts',{...settings,...(apiKey?{apiKey}:{})},'配音服务配置已保存。').then(()=>setApiKey(''))}>保存配音配置</button>{snapshot.ttsConfigured&&<button disabled={busy||(settings.enabled&&!capability.available)} onClick={()=>void controller.action('tts',{apiKey:''},'语音密钥已清除。')}>清除密钥</button>}</div>
   </div>;
 }
