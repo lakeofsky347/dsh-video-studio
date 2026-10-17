@@ -4,7 +4,7 @@
 
 映流（`dsh-video-studio`）是 DSH Desktop 的视频制作插件。你可以把图片、文字和音频交给当前会话中的模型，让它编排分镜、编写动画；也可以打开工作台，自己修改文案、安排声音、逐帧检查画面。分镜、素材、前端源码和修改历史都保存在本地工程中，方便继续编辑。
 
-当前版本：**0.4.0**。适配 **DSH 0.2.0-rc.2**，主要在 macOS Desktop 上验证。
+当前版本：**0.4.0**。适配 **DSH 0.2.1-rc.1**，主要在 macOS Desktop 上验证。
 
 [![映流工作台：左侧素材、中间分镜画布、右侧镜头属性，下方为镜头顺序和影片预览](docs/images/readme/workbench.png)](docs/images/readme/workbench.png)
 
