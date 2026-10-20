@@ -239,6 +239,7 @@ export class StudioService {
           if(data.project){project=structuredClone(data.project);validateStoredProject(project);validateSources(project,data.sources??[]);for(const item of data.sources??[])parseSceneSource(JSON.stringify(item.source));}
           else{
             project=createProject(String(data.title||'未命名视频'),String(data.topic||''));if(data.target)project=updateTarget(project,data.target);if(data.targetDuration!==undefined)project.targetDuration=Number(data.targetDuration);
+            if(data.videoStyle&&typeof data.videoStyle==='object'&&typeof data.videoStyle.name==='string'&&typeof data.videoStyle.prompt==='string')project.videoStyle=structuredClone(data.videoStyle);
             if(data.blank===true){project.shots=[];project.shotOrder=[];project.graph={positions:{'film-output':[375,140]},groups:[]};project.extensions.graphEdges=[];}
             project.extensions.brief={profile:String(data.profile??''),preset:String(data.preset??'')};
           }

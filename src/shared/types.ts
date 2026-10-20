@@ -26,6 +26,11 @@ export interface AudioClip {
   startSeconds:number;trimStart:number;trimEnd?:number;volume:number;fadeIn:number;fadeOut:number;loop?:boolean;
 }
 export interface TtsSettings {endpoint:string;model:string;voice:string;apiKey?:string;speed:number;enabled:boolean}
+export interface VideoStyle {
+  id:string;name:string;description:string;prompt:string;
+  sourceFormat:'markdown'|'json'|'zip'|'folder'|'custom';sourceName:string;
+  createdAt:string;updatedAt:string;
+}
 export interface ExportResult {
   id:string; path:string; url?:string; createdAt:string; revision:number;
   width:number; height:number; frameCount:number; duration:number; qa?:Record<string,unknown>;
@@ -35,7 +40,7 @@ export interface VideoProject {
   createdAt:string; updatedAt:string; revision:number; target:VideoTarget;
   assets:Asset[]; shots:Shot[]; shotOrder:string[]; graph:GraphLayout;
   outputs:ExportResult[]; extensions:Record<string,unknown>;
-  sessionIds?:string[];audioClips?:AudioClip[];
+  sessionIds?:string[];audioClips?:AudioClip[];videoStyle?:VideoStyle;
 }
 export interface SpecShot extends Shot { startFrame:number; endFrame:number; assets:Asset[] }
 export interface VideoSpec {
@@ -74,6 +79,7 @@ export interface StudioSnapshot {
   projects?:ProjectLocation[];history?:ProjectHistory;
   bindings?:SessionBindings;relatedSessionIds?:string[];currentSessionIds?:string[];
   routing?:{callerSessionId?:string;ownerSessionId?:string;routingSource:string};
+  styles?:VideoStyle[];
 }
 export type RpcResult<T=unknown>={ok:true;value:T}|{ok:false;error:{code:string;message:string}};
 export interface ClientRpc { call(channel:string,endpoint:string,payload:unknown,signal?:AbortSignal):Promise<RpcResult> }

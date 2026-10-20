@@ -193,3 +193,9 @@ TTS 是独立能力，不把 ctx.llm 当作音频接口。本地适配为 macOS 
 工具回执增加 `callerSessionId`（实际调用者）、`ownerSessionId`（当前工程归属会话）与 `routingSource`（`explicit-project`、`session-binding`、`subagent-ancestor` 或 `selected-project`）。显式 projectId 固定操作工程，任务启动后使用已解析工程与 revision，不随默认关联变化转向。`sessionId` 为兼容导航字段，客户端优先使用 callerSessionId 返回实际调用会话；子代理导航使用宿主 durable parent/child/mode 地址。
 
 旧 v1 sessions 字典迁移为 v2 当前及关联工程。项目 JSON 的 sessionIds 不再用于重启自动绑定；复制或导入影片不会自动激活来源会话。详细使用规则见 [SESSION-WORKFLOW.md](SESSION-WORKFLOW.md)。
+
+## 0.5.0 自定义视频风格
+
+桌面工作台提供 `styles.list`、`styles.save` 和 `styles.delete` RPC。风格库保存在 DSH 视频工程基目录的 `styles.json`，不属于单个影片工程；新建影片时选择风格，会将风格副本保存到影片 JSON 的 `videoStyle` 字段。故事板与镜头生成把这段内容作为创作参考。
+
+本地界面可导入 Markdown、TXT、JSON、ZIP 风格包和文件夹。导入器读取文字描述及常见 JSON 名称、说明和 prompt 字段，不执行导入文件中的代码。每个风格最多保存 80,000 字符的 prompt。

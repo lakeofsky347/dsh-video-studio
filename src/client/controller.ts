@@ -1,4 +1,4 @@
-import type { ClientRpc, ModelRoute, ProjectHistory, ProjectLocation, SceneSource, SessionBindings, StudioApi, StudioSnapshot, VideoProject } from '../shared/types.ts';
+import type { ClientRpc, ModelRoute, ProjectHistory, ProjectLocation, SceneSource, SessionBindings, StudioApi, StudioSnapshot, VideoProject, VideoStyle } from '../shared/types.ts';
 import { SourceDraftStore, type SourceDraft } from './source-drafts.ts';
 
 export interface StudioState {
@@ -9,6 +9,7 @@ export interface StudioState {
   sourceDraft:boolean; sourceDraftCount:number; draftSerial:number;
   workspaceView:'projects'|'studio'; projects:ProjectLocation[]; libraryLoading:boolean;
   sessionBindings:SessionBindings; relationPending:boolean;
+  styles:VideoStyle[];
 }
 export class StudioRequestError extends Error {constructor(message:string,readonly code:string){super(message);this.name='StudioRequestError';}}
 export class RpcStudioApi implements StudioApi {
@@ -22,7 +23,7 @@ export class RpcStudioApi implements StudioApi {
 
 /** The plugin owns drafts and polling across DSH page navigation. */
 export class StudioController {
-  private state:StudioState={snapshot:null,loading:true,pending:false,saving:false,dirty:false,conflict:false,error:'',notice:'',scheme:'dark',selected:null,route:{provider:'',model:''},canUndo:false,canRedo:false,history:null,localImages:{},focusFrame:null,focusSerial:0,sourceDraft:false,sourceDraftCount:0,draftSerial:0,workspaceView:'projects',projects:[],libraryLoading:false,sessionBindings:{},relationPending:false};
+  private state:StudioState={snapshot:null,loading:true,pending:false,saving:false,dirty:false,conflict:false,error:'',notice:'',scheme:'dark',selected:null,route:{provider:'',model:''},canUndo:false,canRedo:false,history:null,localImages:{},focusFrame:null,focusSerial:0,sourceDraft:false,sourceDraftCount:0,draftSerial:0,workspaceView:'projects',projects:[],libraryLoading:false,sessionBindings:{},relationPending:false,styles:[]};
   private listeners=new Set<()=>void>(); private disposed=false;
   private saveTimer:ReturnType<typeof setTimeout>|undefined; private pollTimer:ReturnType<typeof setTimeout>|undefined;
   private editSerial=0; private dirty=false; private savingPromise:Promise<void>|null=null; private saveFailed=false;
@@ -54,7 +55,7 @@ export class StudioController {
       route:{provider:provider?.id||'',model:model?.id||''}});
     if(snapshot.task?.status==='running')this.schedulePoll();
   }
-  async load(force=false):Promise<void>{try{const snapshot=await this.api.call<StudioSnapshot>('catalog');if(force){this.dirty=false;this.update({dirty:false,conflict:false,saving:false});}this.accept(snapshot,!force);if(!this.state.conflict)this.update({error:''});if(!snapshot.project)this.update({workspaceView:'projects'});await Promise.all([this.refreshHistory(),this.refreshProjects()]);}catch(e){this.update({loading:false,error:message(e)});}}
+  async load(force=false):Promise<void>{try{const snapshot=await this.api.call<StudioSnapshot>('catalog');if(force){this.dirty=false;this.update({dirty:false,conflict:false,saving:false});}this.accept(snapshot,!force);if(!this.state.conflict)this.update({error:''});if(!snapshot.project)this.update({workspaceView:'projects'});await Promise.all([this.refreshHistory(),this.refreshProjects(),this.refreshStyles()]);}catch(e){this.update({loading:false,error:message(e)});}}
   private snapshotReadGuard(projectId:string):()=>boolean {
     const epoch=this.actionEpoch,revision=this.serverRevision,edits=this.editSerial,read=++this.snapshotReadSerial;
     return ()=>!this.disposed&&!this.state.pending&&!this.savingPromise&&this.state.snapshot?.project?.id===projectId&&this.actionEpoch===epoch&&this.serverRevision===revision&&this.editSerial===edits&&this.snapshotReadSerial===read;
@@ -82,6 +83,17 @@ export class StudioController {
       if(Array.isArray(result.projects))this.update({projects:result.projects,sessionBindings:bindings});
     }catch(e){if(read===this.libraryReadSerial)this.update({error:message(e)});}
     finally{if(read===this.libraryReadSerial)this.update({libraryLoading:false});}
+  }
+  async refreshStyles():Promise<void>{
+    try{const result=await this.api.call<{styles:VideoStyle[]}>('styles.list');if(Array.isArray(result.styles))this.update({styles:result.styles});}
+    catch(e){this.update({error:message(e)});}
+  }
+  async saveStyle(style:Partial<VideoStyle>):Promise<VideoStyle>{
+    const result=await this.api.call<{style:VideoStyle;styles:VideoStyle[]}>('styles.save',{style});
+    if(Array.isArray(result.styles))this.update({styles:result.styles});return result.style;
+  }
+  async deleteStyle(id:string):Promise<void>{
+    const result=await this.api.call<{styles:VideoStyle[]}>('styles.delete',{id});if(Array.isArray(result.styles))this.update({styles:result.styles});
   }
   async showProjects():Promise<boolean>{await this.flush();if(this.dirty){this.update({error:this.state.error||'工程修改尚未保存，请先处理保存错误。'});return false;}this.update({workspaceView:'projects'});await this.refreshProjects();return true;}
   showStudio=():void=>this.update({workspaceView:'studio'});

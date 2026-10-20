@@ -1,7 +1,8 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { ProviderGroup, RpcResult, StudioSnapshot, VideoProject, TtsSettings, SessionBinding } from '../shared/types.ts';
+import { randomUUID } from 'node:crypto';
+import type { ProviderGroup, RpcResult, StudioSnapshot, VideoProject, TtsSettings, SessionBinding, VideoStyle } from '../shared/types.ts';
 import type { HostContext, SessionDirectoryRow } from './platform.ts';
 import { StudioService } from './service.ts';
 
@@ -32,6 +33,8 @@ export class ProjectHub {
   private providers:ProviderGroup[]=[];
   private tts?:TtsSettings;
   private ttsConfigured?:boolean;
+  private styles:VideoStyle[]=[];
+  private styleWrites:Promise<void>=Promise.resolve();
   constructor(private ctx:HostContext,config:{baseDirectory?:string}={}){
     this.baseDirectory=resolve(config.baseDirectory??process.env.DSH_VIDEO_PROJECTS??join(homedir(),'Documents','DSHVideoProjects'));
     this.bootstrap=this.makeService();
@@ -48,6 +51,10 @@ export class ProjectHub {
         this.index={version:2,selected:saved.selected,projects:saved.projects,bindings:Object.fromEntries(Object.entries(saved.sessions).filter((entry):entry is [string,string]=>typeof entry[1]==='string').map(([id,projectId])=>[id,{currentProjectId:projectId,relatedProjectIds:[projectId],updatedAt}]))};
         migrated=true;
       }
+    }catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
+    try{
+      const saved=JSON.parse(await readFile(join(this.baseDirectory,'styles.json'),'utf8'));
+      if(Array.isArray(saved))this.styles=saved.filter((item):item is VideoStyle=>!!item&&typeof item==='object'&&typeof item.id==='string'&&typeof item.name==='string'&&typeof item.prompt==='string');
     }catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
     const current=await this.bootstrap.snapshot();
     this.providers=current.providers;this.tts=current.tts;this.ttsConfigured=current.ttsConfigured;
@@ -71,6 +78,30 @@ export class ProjectHub {
       await writeFile(temporary,JSON.stringify(candidate,null,2)+'\n');await rename(temporary,file);
       this.index=candidate;
     });return this.writes;
+  }
+  private async saveStyles(change:(styles:VideoStyle[])=>VideoStyle[]):Promise<void>{
+    this.styleWrites=this.styleWrites.catch(()=>{}).then(async()=>{
+      const candidate=change(structuredClone(this.styles));
+      await mkdir(this.baseDirectory,{recursive:true});
+      const file=join(this.baseDirectory,'styles.json'),temporary=file+'.tmp-'+randomUUID();
+      await writeFile(temporary,JSON.stringify(candidate,null,2)+'\n');await rename(temporary,file);this.styles=candidate;
+    });
+    await this.styleWrites;
+  }
+  private async saveStyle(data:Input):Promise<RpcResult>{
+    const input=record(data.style),name=typeof input.name==='string'?input.name.trim():'';
+    const prompt=typeof input.prompt==='string'?input.prompt.trim():'';
+    if(!name||name.length>100)throw new Error('风格名称须为 1–100 个字符');
+    if(!prompt||prompt.length>80000)throw new Error('风格描述须为 1–80000 个字符');
+    const now=new Date().toISOString(),id=typeof input.id==='string'&&input.id?input.id:randomUUID();
+    const previous=this.styles.find(style=>style.id===id);
+    const formats=['markdown','json','zip','folder','custom'] as const;
+    const sourceFormat=formats.includes(input.sourceFormat as typeof formats[number])?input.sourceFormat as VideoStyle['sourceFormat']:'custom';
+    const style:VideoStyle={id,name,description:typeof input.description==='string'?input.description.slice(0,1000):'',prompt,sourceFormat,
+      sourceName:typeof input.sourceName==='string'?input.sourceName.slice(0,255):name,
+      createdAt:previous?.createdAt??(typeof input.createdAt==='string'?input.createdAt:now),updatedAt:now};
+    await this.saveStyles(styles=>{const index=styles.findIndex(item=>item.id===id);if(index<0)styles.push(style);else styles[index]=style;return styles;});
+    return {ok:true,value:{style,styles:structuredClone(this.styles)}};
   }
   private async remember(snapshot:StudioSnapshot){
     if(!snapshot.project||!snapshot.root)return;
@@ -196,7 +227,7 @@ export class ProjectHub {
     const currentSessionIds=relatedSessionIds.filter(id=>this.index.bindings[id]!.currentProjectId===snapshot.project?.id);
     const linked=(id:string|undefined)=>id&&relatedSessionIds.includes(id)?id:undefined;
     const activeSession=linked(sessionId)??linked(selected?this.selectedSession:undefined);
-    return {...snapshot,providers:this.providers,tts:this.tts??snapshot.tts,ttsConfigured:this.ttsConfigured??snapshot.ttsConfigured,sessionId:activeSession,relatedSessionIds,currentSessionIds,bindings:structuredClone(this.index.bindings),focus:selected?this.focus:undefined,projects:structuredClone(this.index.projects.filter(item=>!item.archived)),recent:snapshot.recent.filter(item=>!this.index.projects.find(entry=>entry.id===item.id)?.archived)};
+    return {...snapshot,providers:this.providers,tts:this.tts??snapshot.tts,ttsConfigured:this.ttsConfigured??snapshot.ttsConfigured,sessionId:activeSession,relatedSessionIds,currentSessionIds,bindings:structuredClone(this.index.bindings),focus:selected?this.focus:undefined,projects:structuredClone(this.index.projects.filter(item=>!item.archived)),recent:snapshot.recent.filter(item=>!this.index.projects.find(entry=>entry.id===item.id)?.archived),styles:structuredClone(this.styles)};
   }
   /** Directory-only routing metadata also works before a project is created. */
   async sessionRouting(sessionId:string,signal?:AbortSignal):Promise<{projectId?:string;routing:ProjectRouting;requiresRevision:boolean}>{
@@ -232,6 +263,12 @@ export class ProjectHub {
     try{
       await this.initialized;if(this.disposed)throw new Error('插件服务已停止');const data=record(payload),sessionId=typeof data.sessionId==='string'?data.sessionId:undefined;
       const projectInput=record(data.project);
+      if(endpoint==='styles.list')return {ok:true,value:{styles:structuredClone(this.styles)}};
+      if(endpoint==='styles.save')return await this.saveStyle(data);
+      if(endpoint==='styles.delete'){
+        const styleId=typeof data.id==='string'?data.id:'';if(!styleId)throw new Error('缺少风格 ID');
+        await this.saveStyles(styles=>styles.filter(style=>style.id!==styleId));return {ok:true,value:{styles:structuredClone(this.styles)}};
+      }
       if(endpoint==='list')return {ok:true,value:{projects:structuredClone(this.index.projects.filter(item=>data.includeArchived===true||!item.archived)),bindings:structuredClone(this.index.bindings),sessions:this.sessions(),selected:this.index.selected}};
       const explicitId=typeof data.projectId==='string'?data.projectId:typeof projectInput.id==='string'?projectInput.id:undefined;
       const routed=sessionId&&!explicitId?this.bindingOwner(sessionId,await this.directory(sessionId)):undefined;
