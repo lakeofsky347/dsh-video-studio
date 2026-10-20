@@ -4,7 +4,7 @@
 
 映流（`dsh-video-studio`）是 DSH Desktop 的视频制作插件。你可以把图片、文字和音频交给当前会话中的模型，让它编排分镜、编写动画；也可以打开工作台，自己修改文案、安排声音、逐帧检查画面。分镜、素材、前端源码和修改历史都保存在本地工程中，方便继续编辑。
 
-当前版本：**0.5.0**。适配 **DSH 0.2.1-rc.2**，主要在 macOS Desktop 上验证。
+当前版本：**0.5.1**。适配 **DSH 0.2.1-rc.2**，主要在 macOS Desktop 上验证。
 
 [![映流工作台：左侧素材、中间分镜画布、右侧镜头属性，下方为镜头顺序和影片预览](docs/images/readme/workbench.png)](docs/images/readme/workbench.png)
 
@@ -60,7 +60,7 @@
 
 ### 2. 安装并启用插件
 
-1. 准备与当前版本对应的安装包，例如 `dsh-video-studio-0.5.0.tgz`。可使用维护者提供的包，或按[开发与扩展](#development)中的步骤自行构建。
+1. 准备与当前版本对应的安装包，例如 `dsh-video-studio-0.5.1.tgz`。可使用维护者提供的包，或按[开发与扩展](#development)中的步骤自行构建。
 2. 打开 DSH 的 **插件管理 → 添加插件**，填写 `.tgz` 文件的绝对路径。
 3. 安装完成后启用插件。安装与启用是两个步骤，请确认插件已处于运行状态。
 4. 点击 DSH 侧栏的 **映流 · 视频工作台**，进入影片首页。
@@ -403,6 +403,8 @@ npm run build
 node -e "require('node:fs').mkdirSync('artifacts',{recursive:true})"
 npm pack --pack-destination artifacts
 ```
+
+构建会检查最终 `lib/client.js` 并执行其模块工厂，只允许宿主提供的 `react` 与 `react/jsx-runtime` 外部引用。LiteGraph、风格 ZIP 导入所需的 `fflate` 必须内联；DSH 浏览器加载器不会从 `node_modules` 查找普通 npm 包。若出现 `require("fflate") missed the module table`，请重建并安装修正后的包，仅向依赖或 `dsh.client.inject` 添加 `fflate` 无法解决该问题。可以用 `node scripts/check-client-bundle.mjs` 单独检查构建产物。
 
 `scripts/prepare-local.mjs` 供维护者复用已有本地依赖，必须明确设置 `DSH_REFERENCE_PLUGIN`，指向已安装本插件全部开发与运行依赖的参考插件目录；宿主依赖默认来自参考目录的 `.local/runtime/node_modules`，也可用 `DSH_HOST_NODE_MODULES` 指定。脚本先检查来源，缺失时会停止并给出标准 npm 流程指引。新机器优先使用上述 npm 流程，无需个人目录、父仓库 Playwright 或本地 tar 包。
 
