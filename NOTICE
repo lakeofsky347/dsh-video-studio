@@ -1,0 +1,10 @@
+DSH Video Studio
+Copyright (c) 2026 DSH Video Studio contributors
+
+This project is licensed under the Apache License, Version 2.0.
+Earlier releases were distributed under the MIT License. Their original
+copyright and permission notice is retained in licenses/Legacy-MIT.txt
+(distributed as lib/licenses/Legacy-MIT.txt in the npm package).
+
+Third-party components retain their original licenses and notices.
+See THIRD_PARTY_NOTICES.md for component attribution and license locations.

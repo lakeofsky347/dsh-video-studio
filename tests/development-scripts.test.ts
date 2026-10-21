@@ -116,14 +116,16 @@ if(args.includes('--from-default-profile')){const target=path.join(process.env.D
 else console.log(JSON.stringify({args,home:process.env.DSH_HOME,projects:process.env.DSH_VIDEO_PROJECTS}));`);
     const plugin=path.join(root,'插件 & 目录'),home=path.join(root,'隔离 home'),projects=path.join(root,'工程 目录'),profile='影片 预览';
     await file(plugin,'lib/index.js','');
+    const pluginName='@fixture/dsh-video-studio';
+    await file(plugin,'package.json',JSON.stringify({name:pluginName}));
     const extra=await file(root,'extra.yml','- id: locale\n  config:\n    preference: zh\n');
     const result=await exec(process.execPath,[path.resolve(import.meta.dirname,'../scripts/preview.mjs')],{env:{...process.env,DSH_CLI:cli,DSH_PREVIEW_PLUGIN:plugin,DSH_PREVIEW_HOME:home,DSH_PREVIEW_PROJECTS:projects,DSH_PREVIEW_PROFILE:profile,DSH_PREVIEW_PORT:'19699',DSH_SESSION_FIXTURE:'1',DSH_OFFLINE:'1',DSH_PREVIEW_EXTRA_PATCH:extra},shell:false});
     const launched=JSON.parse(result.stdout.trim().split('\n').at(-1)!);
     assert.deepEqual(launched,{args:['--profile',profile,'--no-open','--port','19699'],home,projects});
     const location=path.join(home,'profiles',profile),manifest=JSON.parse(await fs.readFile(path.join(location,'package.json'),'utf8'));
-    assert.equal(manifest.dependencies['dsh-video-studio'],`link:${plugin}`);
-    assert.deepEqual(manifest.dsh.profile.bundles,['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','dsh-video-studio']);
-    assert.equal(await fs.realpath(path.join(location,'node_modules/dsh-video-studio')),await fs.realpath(plugin));
+    assert.equal(manifest.dependencies[pluginName],`link:${plugin}`);
+    assert.deepEqual(manifest.dsh.profile.bundles,['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app',pluginName]);
+    assert.equal(await fs.realpath(path.join(location,'node_modules',pluginName)),await fs.realpath(plugin));
     const patch=await fs.readFile(path.join(location,'cordis.patch.yml'),'utf8');
     assert.match(patch,/video-studio-session-offline/);assert.match(patch,/preference: zh/);
   }finally{await fs.rm(root,{recursive:true,force:true});}
