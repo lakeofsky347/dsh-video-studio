@@ -421,6 +421,6 @@ npm pack --pack-destination artifacts
 | [配图来源](docs/images/readme/SOURCES.md) | 截图环境、演示素材和各张图片的内容 |
 | [项目来源](docs/ORIGIN.md) | 插件与相关项目的关系 |
 | [第三方声明](THIRD_PARTY_NOTICES.md) | 使用的开源组件和许可来源 |
-| [Apache-2.0 许可证](LICENSE) | 本项目的使用许可 |
+| [GNU GPL v3.0 许可证（GPL-3.0-only）](LICENSE) | 本项目的使用许可 |
 
 本地验收记录保存在 `artifacts/verification/`，按版本分目录。检查记录分别说明固定响应模型测试、真实本地媒体、原生界面、远程服务和人工观看的完成情况。README 配图来自独立演示环境，截图与功能说明不能代替特定云端模型或语音服务的实际验证。
