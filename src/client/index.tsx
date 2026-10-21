@@ -43,7 +43,7 @@ export function apply(ctx:ClientContext):void {
   const t=ctx.locale.bind('video-studio');
   const syncTheme=()=>controller.setScheme(ctx.theme?.getTheme().active.colorScheme||(document.body.hasAttribute('data-ds-dark-theme')?'dark':'light'));
   syncTheme();ctx.effect(()=>ctx.on('theme/change',syncTheme),'video-studio: theme');
-  ctx.effect(()=>{const style=document.createElement('style');style.dataset.plugin='@lks347/dsh-video-studio';style.textContent=css;document.head.append(style);return()=>style.remove();},'video-studio: styles');
+  ctx.effect(()=>{const style=document.createElement('style');style.dataset.plugin='dsh-video-studio';style.textContent=css;document.head.append(style);return()=>style.remove();},'video-studio: styles');
   function SessionStudio(){
     const list=useSyncExternalStore(listener=>ctx.sessions.list.subscribe(listener),()=>ctx.sessions.list.getSnapshot(),()=>ctx.sessions.list.getSnapshot());
     const workspaces=useSyncExternalStore(listener=>ctx.workspaces.list.subscribe(listener),()=>ctx.workspaces.list.getSnapshot(),()=>ctx.workspaces.list.getSnapshot());

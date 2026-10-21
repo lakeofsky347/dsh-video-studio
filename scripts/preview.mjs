@@ -3,7 +3,6 @@ import {resolve,dirname} from 'node:path';
 import {spawn,spawnSync} from 'node:child_process';
 import {resolveDshCli,ensureDirectoryLink} from './dev-environment.mjs';
 const root=resolve(import.meta.dirname,'..'),pluginRoot=resolve(process.env.DSH_PREVIEW_PLUGIN??root);
-const pluginName=JSON.parse(readFileSync(resolve(pluginRoot,'package.json'),'utf8')).name;
 const cli=resolveDshCli({cwd:root});
 if(!existsSync(resolve(pluginRoot,'lib/index.js')))throw new Error('Build the plugin first');
 const home=resolve(process.env.DSH_PREVIEW_HOME??resolve(root,'.local/test-home')),profileName=process.env.DSH_PREVIEW_PROFILE??'video-studio-v1',profile=resolve(home,'profiles',profileName);
@@ -11,9 +10,9 @@ const env={...process.env,DSH_HOME:home,DSH_VIDEO_PROJECTS:resolve(process.env.D
 mkdirSync(dirname(profile),{recursive:true});
 if(!existsSync(resolve(profile,'cordis.yml'))){const init=spawnSync(cli.command,[...cli.prefixArgs,'--profile',profileName,'--from-default-profile','web','--help'],{cwd:root,env,encoding:'utf8',shell:false});if(init.error)throw init.error;if(init.status!==0)throw new Error(init.stderr||'Could not initialize isolated profile');}
 const manifestPath=resolve(profile,'package.json'),manifest=JSON.parse(readFileSync(manifestPath,'utf8'));
-manifest.dependencies={[pluginName]:`link:${pluginRoot}`};manifest.dsh.profile.bundles=['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app',pluginName];
+manifest.dependencies={'dsh-video-studio':`link:${pluginRoot}`};manifest.dsh.profile.bundles=['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','dsh-video-studio'];
 writeFileSync(manifestPath,JSON.stringify(manifest,null,2)+'\n');
-const link=resolve(profile,'node_modules',pluginName);ensureDirectoryLink(pluginRoot,link);
+const link=resolve(profile,'node_modules/dsh-video-studio');ensureDirectoryLink(pluginRoot,link);
 const patch=resolve(home,'offline.patch.yml'),sessionFixture=process.env.DSH_SESSION_FIXTURE==='1';
 const sessionProvider=resolve(process.env.DSH_SESSION_PROVIDER_FIXTURE??resolve(root,'tests/fixtures/session-provider.mjs'));
 writeFileSync(patch,sessionFixture?`- id: agent-default-model\n  config:\n    provider: video-studio-session-offline\n    model: offline-session-video\n- id: llm-pi-ai\n  disabled: true\n- id: llm-deepseek\n  disabled: true\n- id: llm-deepseek-account\n  disabled: true\n- insert:\n    - id: video-studio-session-offline\n      name: ${JSON.stringify(sessionProvider)}\n`:`- insert:\n    - id: video-studio-offline\n      name: ${JSON.stringify(resolve(root,'tests/fixtures/preview-provider.mjs'))}\n`);

@@ -1,12 +1,8 @@
 {
-  "name": "@lks347/dsh-video-studio",
+  "name": "dsh-video-studio",
   "version": "0.5.1",
   "type": "module",
   "license": "Apache-2.0",
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org/"
-  },
   "description": "DSH 视频工作台：图文分镜、前端代码生成与编辑、本地 MP4 导出",
   "main": "lib/index.js",
   "exports": {
