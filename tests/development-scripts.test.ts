@@ -34,7 +34,8 @@ test('PATH is searched before the macOS app fallback, and other platforms have n
   try{
     const executable=await file(root,'dsh','#!/usr/bin/env node\n');await fs.chmod(executable,0o755);
     const app=await file(root,'macOS-fallback.mjs','');
-    assert.equal(resolveDshCli({platform:'darwin',env:{PATH:root},macDefault:app}).command,executable);
+    // A simulated Unix PATH must not contain a Windows drive colon.
+    assert.equal(resolveDshCli({platform:'darwin',cwd:root,env:{PATH:'.'},macDefault:app}).command,executable);
     assert.equal(resolveDshCli({platform:'darwin',env:{PATH:''},macDefault:app}).prefixArgs[0],app);
     assert.throws(()=>resolveDshCli({platform:'linux',env:{PATH:''},macDefault:app}),/not found on PATH/);
   }finally{await fs.rm(root,{recursive:true,force:true});}
