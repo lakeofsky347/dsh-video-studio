@@ -4,6 +4,7 @@ import { FilmMark, Studio } from './Studio.tsx';
 import css from './styles.css?inline';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { sessionDirectory, sessionTarget, type HostSessionList, type HostWorkspaceList, type Observable, type SessionTarget } from './session-host-adapter.ts';
+import {assertClientContract} from '../shared/host-contract.ts';
 
 type RecordValue=Record<string,unknown>;
 function object(value:unknown):RecordValue{return value!==null&&typeof value==='object'&&!Array.isArray(value)?value as RecordValue:{};}
@@ -23,6 +24,7 @@ interface ClientContext {
 }
 export const inject=['slots','locale','connection','theme','layout','uiWorkspace','sessions','workspaces'];
 export function apply(ctx:ClientContext):void {
+  assertClientContract(ctx);
   const abort=new AbortController();
   const controller=new StudioController(new RpcStudioApi(ctx.connection.rpc,abort.signal));
   let directEntry=false;

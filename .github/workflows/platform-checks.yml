@@ -14,6 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        host: [0.2.1-rc.2, latest, next]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     defaults:
@@ -40,7 +41,7 @@ jobs:
       - name: Install locked plugin dependencies
         run: npm ci --legacy-peer-deps --ignore-scripts --no-audit --no-fund
       - name: Install the official host outside the checkout
-        run: npm install --prefix "$env:DSH_RUNTIME" --ignore-scripts --no-audit --no-fund --save-exact @deepseek-ai/dsh@0.2.0-rc.2
+        run: npm install --prefix "$env:DSH_RUNTIME" --ignore-scripts --no-audit --no-fund --save-exact @deepseek-ai/dsh@${{ matrix.host }}
       - name: Link matching host peers
         run: node scripts/link-host-dependencies.mjs "$env:DSH_RUNTIME/node_modules"
       - name: Record runtime and local media availability
@@ -51,3 +52,5 @@ jobs:
         run: npm test
       - name: Build
         run: npm run build
+      - name: Check official host compatibility policy
+        run: node scripts/check-host-compatibility.mjs "$env:DSH_RUNTIME/node_modules"

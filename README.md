@@ -4,7 +4,7 @@
 
 映流（`dsh-video-studio`）是 DSH Desktop 的视频制作插件。你可以把图片、文字和音频交给当前会话中的模型，让它编排分镜、编写动画；也可以打开工作台，自己修改文案、安排声音、逐帧检查画面。分镜、素材、前端源码和修改历史都保存在本地工程中，方便继续编辑。
 
-当前版本：**0.5.1**。适配 **DSH 0.2.1-rc.2**，主要在 macOS Desktop 上验证。
+当前版本：**0.5.2**。按插件所需的宿主接口检查兼容性，不再绑定 DSH 发布版本号；主要在 macOS Desktop 上验证。详见[宿主兼容机制](docs/COMPATIBILITY.md)。
 
 [![映流工作台：左侧素材、中间分镜画布、右侧镜头属性，下方为镜头顺序和影片预览](docs/images/readme/workbench.png)](docs/images/readme/workbench.png)
 
@@ -47,7 +47,7 @@
 
 | 需要准备 | 用途 | 什么时候需要 |
 | --- | --- | --- |
-| DSH Desktop，版本与插件适配要求一致 | 运行插件，提供会话、模型和任务服务 | 始终需要 |
+| DSH Desktop，提供插件所需的服务接口 | 运行插件，提供会话、模型和任务服务 | 始终需要 |
 | 本机 Chrome 或 Chromium | 捕获实际画面帧并参与视频渲染 | 实际帧检查和导出时 |
 | FFmpeg | 视频编码、音频处理与混音 | 导出或处理声音时 |
 | ffprobe | 读取音频与成片信息 | 导入音频、检查媒体时 |
@@ -60,7 +60,7 @@
 
 ### 2. 安装并启用插件
 
-1. 准备与当前版本对应的安装包，例如 `dsh-video-studio-0.5.1.tgz`。可使用维护者提供的包，或按[开发与扩展](#development)中的步骤自行构建。
+1. 准备与当前版本对应的安装包，例如 `dsh-video-studio-0.5.2.tgz`。可使用维护者提供的包，或按[开发与扩展](#development)中的步骤自行构建。
 2. 打开 DSH 的 **插件管理 → 添加插件**，填写 `.tgz` 文件的绝对路径。
 3. 安装完成后启用插件。安装与启用是两个步骤，请确认插件已处于运行状态。
 4. 点击 DSH 侧栏的 **映流 · 视频工作台**，进入影片首页。
@@ -355,7 +355,7 @@ command -v ffprobe
 
 | 遇到的情况 | 可以怎样处理 |
 | --- | --- |
-| 安装后找不到入口 | 在插件管理中确认已经启用并处于运行状态，再查找侧栏「映流 · 视频工作台」；同时核对 DSH 与插件版本 |
+| 安装后找不到入口 | 在插件管理中确认已经启用并处于运行状态，再查找侧栏「映流 · 视频工作台」；如有接口缺失提示，按提示核对宿主服务 |
 | 无法选择创作模型 | 先在 DSH 配置模型提供方与模型，再回工作台选择；会话内制作使用的是该会话的模型 |
 | 「创建并生成分镜」不可用 | 先用「创建影片」进入工作台，选择创作模型，再点击「生成分镜」；主题不能为空 |
 | 已生成分镜，但画面仍很基础 | 检查并调整分镜后，继续点击「生成画面」；分镜生成不会自动完成全部动画 |
@@ -385,21 +385,19 @@ command -v ffprobe
 npm ci --legacy-peer-deps --ignore-scripts
 ```
 
-本地测试还需要能解析 `package.json` 中的 DSH peer dependencies。上面的命令会跳过自动安装 peer dependencies；运行插件时这些依赖由 DSH 提供，单独测试时需要链接到版本匹配的官方宿主。可以复用已安装宿主的 `node_modules`，或在**插件检出之外**创建临时宿主目录，按以下步骤准备；将占位路径替换为自己的绝对路径：
+本地测试还需要能解析 `package.json` 中的 DSH peer dependencies。上面的命令会跳过自动安装 peer dependencies；运行插件时这些依赖由 DSH 提供，单独测试时需要链接到官方宿主提供的依赖。可以复用已安装宿主的 `node_modules`，或在**插件检出之外**创建临时宿主目录，按以下步骤准备；将占位路径替换为自己的绝对路径：
 
 ```sh
-npm install --prefix "<临时宿主目录>" --ignore-scripts --save-exact @deepseek-ai/dsh@0.2.0-rc.2
+npm install --prefix "<临时宿主目录>" --ignore-scripts --save-exact @deepseek-ai/dsh@latest
 node scripts/link-host-dependencies.mjs "<临时宿主目录>/node_modules"
 ```
 
-链接脚本会先核对所有 peer 包名和版本，再建立目录链接；Windows 使用 junction。它不修改插件依赖声明或锁文件。也可通过 `DSH_HOST_NODE_MODULES` 指定宿主的 `node_modules` 目录。
+链接脚本会先核对所有 peer 包名与声明范围（包含预发布版本），DSH peers 接受任意发布版本，Cordis 保留内核范围，再建立目录链接；Windows 使用 junction。它不修改插件依赖声明或锁文件。也可通过 `DSH_HOST_NODE_MODULES` 指定宿主的 `node_modules` 目录。
 
 依赖准备好后，执行检查、构建和打包：
 
 ```sh
-npm run typecheck
-npm test
-npm run build
+DSH_HOST_NODE_MODULES="<宿主目录>/node_modules" npm run verify:compat
 node -e "require('node:fs').mkdirSync('artifacts',{recursive:true})"
 npm pack --pack-destination artifacts
 ```
@@ -410,7 +408,7 @@ npm pack --pack-destination artifacts
 
 `npm run preview` 使用官方 DSH 运行库和独立 profile，默认端口为 `19405`。CLI 搜索顺序为显式 `DSH_CLI`、`PATH` 中的 `dsh`，最后是 macOS 的默认 `.app` 路径。显式路径无效时会报错；Windows npm 的 `dsh.cmd` 会转换为已核对官方包的 JS 入口，由 Node 直接执行。其他 `.cmd`/`.bat` 启动器请将 `DSH_CLI` 指向官方 `lib/bin.js`。目录链接在 Windows 使用 junction。预览脚本中的固定响应模型用于本地测试，不随插件发布；它不能用于判断真实模型的生成质量。
 
-`.github/workflows/platform-checks.yml` 定义 Windows、macOS 和 Linux 的类型检查、测试与构建。基础 CI 会记录媒体工具是否可用，媒体测试的跳过不能作为该平台导出通过的证据。Windows CI 先启用 Developer Mode 并实测文件及目录 symlink 权限；权限不足即失败。普通本地测试若缺少该权限会明确跳过真实 symlink 测试，也可设置 `DSH_REQUIRE_SYMLINK_TESTS=1` 要求失败。工作流定义不代表三平台已实际运行或原生界面已验收。
+`.github/workflows/platform-checks.yml` 定义 Windows、macOS 和 Linux 的类型检查、测试与构建，分别使用固定基线宿主、npm `latest` 与 `next` 宿主，并调用官方兼容性判定器做版本矩阵回归。基础 CI 会记录媒体工具是否可用，媒体测试的跳过不能作为该平台导出通过的证据。Windows CI 先启用 Developer Mode 并实测文件及目录 symlink 权限；权限不足即失败。普通本地测试若缺少该权限会明确跳过真实 symlink 测试，也可设置 `DSH_REQUIRE_SYMLINK_TESTS=1` 要求失败。工作流定义不代表三平台已实际运行或原生界面已验收。
 
 | 文档 | 内容 |
 | --- | --- |
